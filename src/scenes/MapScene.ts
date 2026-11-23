@@ -11,6 +11,7 @@ import { roundRect, drawTextShadow } from '../utils/draw';
 import { CHAPTERS, getLevelsByChapter } from '../data/levels';
 import { MenuScene } from './MenuScene';
 import { GameScene } from './GameScene';
+import { StoryScene } from './StoryScene';
 
 // Accurate geographic coastline waypoints [lon, lat] of Mainland Vietnam (clockwise from Hà Giang)
 const VIETNAM_MAINLAND_GEO: ReadonlyArray<[number, number]> = [
@@ -152,6 +153,7 @@ export class MapScene implements Scene {
   private pinHitRects: { chapterIdx: number; rect: Rect; pos: Vec2 }[] = [];
   private levelRects: Rect[] = [];
   private backBtn: Rect = { x: 20, y: 12, width: 128, height: 42 };
+  private storyBtn: Rect = { x: 760, y: 98, width: 164, height: 34 };
   private tutorialBtn: Rect = { x: 774, y: 12, width: 166, height: 42 };
 
   // Cached projected polygons
@@ -196,6 +198,17 @@ export class MapScene implements Scene {
       // Replay tutorial in Level 1
       if (InputManager.hitTest(pos, this.tutorialBtn, 6)) {
         this.engine.scenes.replace(new GameScene(this.engine, 1, true));
+        return;
+      }
+
+      // Watch selected chapter's Visual-Novel Story Cutscene!
+      if (InputManager.hitTest(pos, this.storyBtn, 6)) {
+        const chapter = CHAPTERS[this.selectedChapterIdx];
+        this.engine.scenes.replace(
+          new StoryScene(this.engine, chapter.id, () => {
+            this.engine.scenes.replace(new MapScene(this.engine));
+          }),
+        );
         return;
       }
 
@@ -629,10 +642,24 @@ export class MapScene implements Scene {
     ctx.fillStyle = 'rgba(255,255,255,0.85)';
     ctx.fillText(`${chapter.subtitle} • ${chapter.region}`, panel.x + 20, panel.y + 50);
 
-    // Stars pill top-right of banner
+    // Stars pill + Story Cutscene button on banner
     ctx.textAlign = 'right';
-    ctx.font = 'bold 16px monospace';
-    drawTextShadow(ctx, `⭐ ${earnedStars}/${totalStars}`, panel.x + panel.width - 18, panel.y + 34, '#fff3b0');
+    ctx.font = 'bold 15px monospace';
+    drawTextShadow(ctx, `⭐ ${earnedStars}/${totalStars}`, panel.x + panel.width - 18, panel.y + 22, '#fff3b0');
+
+    // "📖 Cốt truyện" button
+    const sb = this.storyBtn;
+    const sbHover = InputManager.hitTest(this.engine.input.pointer, sb);
+    roundRect(ctx, sb.x, sb.y, sb.width, sb.height, 8);
+    ctx.fillStyle = sbHover ? 'rgba(255,255,255,0.32)' : 'rgba(15, 19, 36, 0.52)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 243, 176, 0.7)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 12.5px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, `📖 Cốt truyện Ch.${chapter.id}`, sb.x + sb.width / 2, sb.y + sb.height / 2, '#fff3b0');
 
     // 5 columns × 2 rows of touch-friendly level circles
     const cols = 5;
@@ -752,7 +779,7 @@ export class MapScene implements Scene {
     ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#FCA311';
     ctx.fillText(
-      pinSpec.catSpeaker === 'boss' ? '👑 Sư Phụ Mèo Tai Cụp' : '🐾 Tiểu Mèo Vàng',
+      pinSpec.catSpeaker === 'boss' ? '👑 Vằn Bếp Trưởng' : '🐾 Mèo Vàng Phụ Bếp',
       tipX + 84,
       tipY + 10,
     );
