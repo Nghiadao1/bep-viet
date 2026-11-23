@@ -33,15 +33,8 @@ export class RecipeBookScene implements Scene {
   enter(): void {
     this.engine.input.clear();
 
-    // Get unlocked recipes
-    const save = this.engine.save.current;
-    this.unlocked = RECIPES.filter(
-      (r) => save.unlockedRecipes.includes(r.id),
-    );
-    // If none unlocked, show all with preview
-    if (this.unlocked.length === 0) {
-      this.unlocked = RECIPES;
-    }
+    // Show all 24 Vietnamese recipes in the cookbook so players can browse every dish
+    this.unlocked = RECIPES;
 
     this.selectedIndex = 0;
     this.page = 0;
@@ -137,22 +130,28 @@ export class RecipeBookScene implements Scene {
       ctx.lineWidth = 1;
       ctx.stroke();
 
-      // Color dot
-      ctx.beginPath();
-      ctx.arc(rect.x + 24, rect.y + itemH / 2, 10, 0, Math.PI * 2);
-      ctx.fillStyle = r.color;
-      ctx.fill();
+      // Pixel art food icon on recipe card
+      ctx.imageSmoothingEnabled = false;
+      const foodKey = `food_${r.id}`;
+      if (this.engine.assets.hasImage(foodKey)) {
+        ctx.drawImage(this.engine.assets.getImage(foodKey), rect.x + 8, rect.y + 10, 52, 52);
+      } else {
+        ctx.beginPath();
+        ctx.arc(rect.x + 24, rect.y + itemH / 2, 10, 0, Math.PI * 2);
+        ctx.fillStyle = r.color;
+        ctx.fill();
+      }
 
       // Name
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
-      drawTextShadow(ctx, r.name, rect.x + 44, rect.y + 24, isSelected ? '#fff' : '#ccc');
+      drawTextShadow(ctx, r.name, rect.x + 68, rect.y + 24, isSelected ? '#fff' : '#ccc');
 
       // English name
       ctx.font = '12px "Segoe UI", system-ui, sans-serif';
       ctx.fillStyle = isSelected ? 'rgba(255,255,255,0.7)' : 'rgba(255,255,255,0.4)';
-      ctx.fillText(r.nameEn, rect.x + 44, rect.y + 48);
+      ctx.fillText(r.nameEn, rect.x + 68, rect.y + 48);
 
       // Price
       ctx.textAlign = 'right';
@@ -241,16 +240,28 @@ export class RecipeBookScene implements Scene {
     ctx.fillStyle = 'rgba(255,255,255,0.7)';
     ctx.fillText(recipe.nameEn, detailX + detailW - 16, detailY + 24);
 
-    // Price
+    // Price & large pixel art sprite preview
+    ctx.imageSmoothingEnabled = false;
+    const detailFoodKey = `food_${recipe.id}`;
+    if (this.engine.assets.hasImage(detailFoodKey)) {
+      ctx.drawImage(
+        this.engine.assets.getImage(detailFoodKey),
+        detailX + detailW - 96,
+        detailY + 62,
+        76,
+        76,
+      );
+    }
+
     ctx.textAlign = 'left';
     ctx.font = 'bold 18px monospace';
     drawTextShadow(ctx, `💰 ${formatMoney(recipe.basePrice)}`, detailX + 20, detailY + 86, '#4CAF50');
 
     // Chapter badge
-    ctx.textAlign = 'right';
+    ctx.textAlign = 'left';
     ctx.font = '14px "Segoe UI"';
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
-    ctx.fillText(`Chương ${recipe.chapter}`, detailX + detailW - 16, detailY + 86);
+    ctx.fillText(`Chương ${recipe.chapter}`, detailX + 120, detailY + 86);
 
     // --- Steps ---
     ctx.textAlign = 'left';

@@ -4,7 +4,7 @@
 
 import type { Engine } from '../core/Engine';
 import type { Scene, Rect, Recipe, LevelConfig, CookingStep } from '../types';
-import { StationType, CustomerMood } from '../types';
+import { StationType, CustomerMood, CustomerType } from '../types';
 import { InputManager } from '../core/InputManager';
 import { roundRect, drawTextShadow, drawProgressBar } from '../utils/draw';
 import { formatMoney, formatTime, clamp, randFloat, randInt, randPick } from '../utils/math';
@@ -31,6 +31,7 @@ interface InlineStation {
 
 interface InlineCustomer {
   id: number;
+  customerType: CustomerType;
   x: number;
   y: number;
   targetX: number;
@@ -405,14 +406,20 @@ export class GameScene implements Scene {
     const recipe = randPick(this.recipes);
     const slot = this.getNextCustomerSlot();
     const patience = randFloat(22, 32);
+    const pool =
+      this.levelConfig.customerTypes && this.levelConfig.customerTypes.length > 0
+        ? this.levelConfig.customerTypes
+        : Object.values(CustomerType);
+    const customerType = randPick(pool);
 
     const customer: InlineCustomer = {
       id: this.nextCustomerId++,
+      customerType,
       x: 960 + 80, // start offscreen
       targetX: slot.x,
       y: slot.y,
-      width: 70,
-      height: 90,
+      width: 76,
+      height: 95,
       patience,
       maxPatience: patience,
       order: recipe,
@@ -583,16 +590,20 @@ export class GameScene implements Scene {
     const W = 960;
     const H = 540;
 
-    // --- Background ---
-    ctx.fillStyle = '#1E1E2E';
-    ctx.fillRect(0, 0, W, H);
+    // --- Pixel art Sài Gòn stall background ---
+    ctx.imageSmoothingEnabled = false;
+    if (this.engine.assets.hasImage('bg_saigon')) {
+      ctx.drawImage(this.engine.assets.getImage('bg_saigon'), 0, 0, W, H);
+    } else {
+      ctx.fillStyle = '#1E1E2E';
+      ctx.fillRect(0, 0, W, H);
 
-    // Floor
-    const floorGrad = ctx.createLinearGradient(0, 350, 0, H);
-    floorGrad.addColorStop(0, '#2A2A3E');
-    floorGrad.addColorStop(1, '#1A1A28');
-    ctx.fillStyle = floorGrad;
-    ctx.fillRect(0, 350, W, H - 350);
+      const floorGrad = ctx.createLinearGradient(0, 350, 0, H);
+      floorGrad.addColorStop(0, '#2A2A3E');
+      floorGrad.addColorStop(1, '#1A1A28');
+      ctx.fillStyle = floorGrad;
+      ctx.fillRect(0, 350, W, H - 350);
+    }
 
     // --- Top bar ---
     this.renderTopBar(ctx, W);
@@ -681,83 +692,101 @@ export class GameScene implements Scene {
   }
 
   private renderCustomers(ctx: CanvasRenderingContext2D): void {
+    ctx.imageSmoothingEnabled = false;
     for (const c of this.customers) {
-      // Customer body
-      const bodyColor =
-        c.mood === CustomerMood.HAPPY ? '#4CAF50'
-        : c.mood === CustomerMood.NEUTRAL ? '#FFC107'
-        : '#E63946';
-
       ctx.save();
 
-      // Shadow
-      ctx.fillStyle = 'rgba(0,0,0,0.2)';
+      // Gentle walking bounce while approaching or leaving
+      const isMoving = c.x > c.targetX + 1 || c.leaving;
+      const bounceY = isMoving ? Math.abs(Math.sin(c.x * 0.08)) * -5 : 0;
+      const drawY = c.y + bounceY;
+
+      // Ground/counter shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
       ctx.beginPath();
-      ctx.ellipse(c.x + c.width / 2, c.y + c.height + 4, c.width / 2.5, 6, 0, 0, Math.PI * 2);
+      ctx.ellipse(c.x + c.width / 2, c.y + c.height + 2, c.width / 2.6, 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      // Body
-      roundRect(ctx, c.x, c.y + 25, c.width, c.height - 25, 8);
-      ctx.fillStyle = bodyColor;
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0,0,0,0.2)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
+      // Pixel art customer character sprite
+      const spriteKey = `customer_${c.customerType.toLowerCase()}`;
+      if (this.engine.assets.hasImage(spriteKey)) {
+        ctx.drawImage(
+          this.engine.assets.getImage(spriteKey),
+          c.x,
+          drawY,
+          c.width,
+          c.height,
+        );
+      } else {
+        const bodyColor =
+          c.mood === CustomerMood.HAPPY ? '#4CAF50'
+          : c.mood === CustomerMood.NEUTRAL ? '#FFC107'
+          : '#E63946';
+        roundRect(ctx, c.x, drawY + 25, c.width, c.height - 25, 8);
+        ctx.fillStyle = bodyColor;
+        ctx.fill();
+      }
 
-      // Head
-      ctx.beginPath();
-      ctx.arc(c.x + c.width / 2, c.y + 18, 18, 0, Math.PI * 2);
-      ctx.fillStyle = '#FFDAB9';
-      ctx.fill();
-      ctx.stroke();
-
-      // Face (mood)
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = '16px "Segoe UI"';
+      // Small mood badge at top-left of customer
       const faceEmoji =
         c.mood === CustomerMood.HAPPY ? '😊'
         : c.mood === CustomerMood.NEUTRAL ? '😐'
         : '😡';
-      ctx.fillText(faceEmoji, c.x + c.width / 2, c.y + 18);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '16px "Segoe UI"';
+      ctx.fillText(faceEmoji, c.x + 8, drawY + 12);
 
-      // Patience bar
+      // Patience bar right on the wooden counter ledge
       if (!c.served && !c.leaving) {
         const ratio = c.patience / c.maxPatience;
         const barColor = ratio > 0.5 ? '#4CAF50' : ratio > 0.2 ? '#FFC107' : '#E63946';
-        drawProgressBar(ctx, c.x, c.y + c.height + 8, c.width, 6, ratio, barColor);
+        drawProgressBar(ctx, c.x + 2, c.y + c.height + 5, c.width - 4, 7, ratio, barColor);
       }
 
-      // Order bubble
+      // Order speech bubble with actual pixel-art dish sprite!
       if (!c.served && c.orderBubbleAlpha > 0) {
         ctx.globalAlpha = c.orderBubbleAlpha;
-        const bx = c.x + c.width + 4;
-        const by = c.y - 10;
-        const bw = 65;
-        const bh = 40;
+        const bx = c.x + c.width - 2;
+        const by = c.y - 6;
+        const bw = 74;
+        const bh = 66;
 
         // Bubble
-        roundRect(ctx, bx, by, bw, bh, 8);
-        ctx.fillStyle = '#fff';
+        roundRect(ctx, bx, by, bw, bh, 10);
+        ctx.fillStyle = '#fffcf5';
         ctx.fill();
-        ctx.strokeStyle = '#ccc';
-        ctx.lineWidth = 1;
+        ctx.strokeStyle = '#3d281c';
+        ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Tail
+        // Tail pointing to customer
         ctx.beginPath();
-        ctx.moveTo(bx, by + bh / 2);
-        ctx.lineTo(bx - 8, by + bh / 2 + 5);
-        ctx.lineTo(bx, by + bh / 2 + 10);
-        ctx.fillStyle = '#fff';
+        ctx.moveTo(bx, by + bh / 2 - 4);
+        ctx.lineTo(bx - 8, by + bh / 2 + 2);
+        ctx.lineTo(bx, by + bh / 2 + 8);
+        ctx.fillStyle = '#fffcf5';
         ctx.fill();
 
-        // Order text
+        // Pixel art dish icon inside bubble
+        const foodKey = `food_${c.order.id}`;
+        if (this.engine.assets.hasImage(foodKey)) {
+          ctx.drawImage(
+            this.engine.assets.getImage(foodKey),
+            bx + (bw - 44) / 2,
+            by + 3,
+            44,
+            44,
+          );
+        }
+
+        // Order name below icon
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.font = 'bold 10px "Segoe UI", sans-serif';
-        ctx.fillStyle = c.order.color;
-        ctx.fillText(c.order.name, bx + bw / 2, by + bh / 2);
+        ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
+        ctx.fillStyle = '#2b1c17';
+        const shortName = c.order.name.length > 11 ? `${c.order.name.slice(0, 10)}…` : c.order.name;
+        ctx.fillText(shortName, bx + bw / 2, by + bh - 10);
 
         ctx.globalAlpha = 1;
       }
@@ -765,7 +794,7 @@ export class GameScene implements Scene {
       // Served check
       if (c.served) {
         ctx.font = '28px "Segoe UI"';
-        ctx.fillText('✅', c.x + c.width / 2, c.y - 5);
+        ctx.fillText('✅', c.x + c.width / 2, drawY - 4);
       }
 
       ctx.restore();
@@ -773,6 +802,7 @@ export class GameScene implements Scene {
   }
 
   private renderStations(ctx: CanvasRenderingContext2D): void {
+    ctx.imageSmoothingEnabled = false;
     for (let i = 0; i < this.stations.length; i++) {
       const st = this.stations[i];
       const isExpected =
@@ -788,81 +818,75 @@ export class GameScene implements Scene {
 
       ctx.save();
 
-      // Shadow
-      ctx.shadowColor = 'rgba(0,0,0,0.3)';
+      // Wooden counter pad beneath station sprite
+      ctx.shadowColor = 'rgba(0,0,0,0.4)';
       ctx.shadowBlur = 8;
       ctx.shadowOffsetY = 4;
 
-      roundRect(ctx, st.x, st.y, st.width, st.height, 10);
-
-      // Determine fill
+      roundRect(ctx, st.x, st.y, st.width, st.height, 12);
       if (st.state === 'cooking') {
-        ctx.fillStyle = '#E85D04';
+        ctx.fillStyle = 'rgba(232, 93, 4, 0.72)';
       } else if (st.state === 'done') {
-        ctx.fillStyle = '#4CAF50';
+        ctx.fillStyle = 'rgba(76, 175, 80, 0.72)';
+      } else if (isExpected) {
+        ctx.fillStyle = 'rgba(252, 163, 17, 0.25)';
       } else {
-        ctx.fillStyle = st.color;
+        ctx.fillStyle = 'rgba(20, 14, 18, 0.55)';
       }
       ctx.fill();
-
       ctx.shadowBlur = 0;
 
       // Highlight border if expected next
       if (isExpected) {
-        roundRect(ctx, st.x - 2, st.y - 2, st.width + 4, st.height + 4, 12);
-        ctx.strokeStyle = `rgba(252, 163, 17, ${0.6 + flash})`;
+        roundRect(ctx, st.x - 2, st.y - 2, st.width + 4, st.height + 4, 14);
+        ctx.strokeStyle = `rgba(252, 163, 17, ${0.7 + flash})`;
         ctx.lineWidth = 3;
         ctx.stroke();
       } else {
-        roundRect(ctx, st.x, st.y, st.width, st.height, 10);
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.lineWidth = 1;
+        roundRect(ctx, st.x, st.y, st.width, st.height, 12);
+        ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+        ctx.lineWidth = 1.5;
         ctx.stroke();
       }
 
-      // Label
+      // Pixel art station sprite
+      const spriteKey = `station_${st.type.toLowerCase()}`;
+      const spriteSize = Math.min(st.width - 14, 72);
+      if (this.engine.assets.hasImage(spriteKey)) {
+        const wobble = st.state === 'cooking' ? Math.sin(st.cookTimer * 24) * 2 : 0;
+        ctx.drawImage(
+          this.engine.assets.getImage(spriteKey),
+          st.x + (st.width - spriteSize) / 2 + wobble,
+          st.y + 6,
+          spriteSize,
+          spriteSize,
+        );
+      }
+
+      // Station label at bottom of pad
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
-      drawTextShadow(ctx, st.label, st.x + st.width / 2, st.y + 24);
+      ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
+      const labelText = st.label.replace(/^[^\s]+\s/, ''); // clean Vietnamese name
+      drawTextShadow(ctx, labelText, st.x + st.width / 2, st.y + st.height - 13, '#fff');
 
-      // State indicator
+      // State indicator overlays
       if (st.state === 'cooking') {
-        // Cook progress bar
         const progress = st.cookTimer / st.cookDuration;
         drawProgressBar(
           ctx,
-          st.x + 10,
-          st.y + st.height - 30,
-          st.width - 20,
+          st.x + 8,
+          st.y + st.height - 32,
+          st.width - 16,
           10,
           progress,
           '#FCA311',
         );
-
-        // Action text
-        ctx.font = '11px "Segoe UI"';
-        ctx.fillStyle = '#fff';
-        ctx.fillText(
-          st.currentStep?.action ?? '...',
-          st.x + st.width / 2,
-          st.y + 50,
-        );
-
-        // Animated fire
-        ctx.font = '20px "Segoe UI"';
-        ctx.fillText('🔥', st.x + st.width / 2, st.y + st.height - 50);
+        ctx.font = '18px "Segoe UI"';
+        ctx.fillText('🔥', st.x + st.width - 14, st.y + 16);
       } else if (st.state === 'done') {
-        ctx.font = '24px "Segoe UI"';
-        ctx.fillText('✅', st.x + st.width / 2, st.y + st.height / 2 + 10);
-      } else {
-        // Idle icon
-        ctx.font = '28px "Segoe UI"';
-        ctx.fillText(
-          st.label.split(' ')[0], // emoji only
-          st.x + st.width / 2,
-          st.y + st.height / 2 + 10,
-        );
+        ctx.font = '22px "Segoe UI"';
+        ctx.fillText('✅', st.x + st.width - 14, st.y + 18);
       }
 
       ctx.restore();
@@ -877,14 +901,24 @@ export class GameScene implements Scene {
 
     // Progress strip background
     roundRect(ctx, 20, y, W - 40, 44, 8);
-    ctx.fillStyle = 'rgba(0,0,0,0.4)';
+    ctx.fillStyle = 'rgba(15, 12, 22, 0.78)';
     ctx.fill();
+    ctx.strokeStyle = 'rgba(252, 163, 17, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    // Pixel art dish icon on progress strip
+    ctx.imageSmoothingEnabled = false;
+    const dishSpriteKey = `food_${dish.recipe.id}`;
+    if (this.engine.assets.hasImage(dishSpriteKey)) {
+      ctx.drawImage(this.engine.assets.getImage(dishSpriteKey), 28, y + 4, 36, 36);
+    }
 
     // Recipe name
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, `🍳 ${dish.recipe.name}`, 32, y + 22, dish.recipe.color);
+    drawTextShadow(ctx, dish.recipe.name, 70, y + 22, '#FCA311');
 
     // Step dots
     const dotStartX = 220;
@@ -974,41 +1008,50 @@ export class GameScene implements Scene {
       if (disabled) ctx.globalAlpha = 0.4;
 
       // Card background
-      ctx.shadowColor = 'rgba(0,0,0,0.3)';
+      ctx.shadowColor = 'rgba(0,0,0,0.35)';
       ctx.shadowBlur = 6;
       ctx.shadowOffsetY = 3;
 
       roundRect(ctx, rect.x, rect.y, rect.width, rect.height, 10);
-      ctx.fillStyle = hover && !disabled ? recipe.color : this.darkenColor(recipe.color, 0.3);
+      ctx.fillStyle = hover && !disabled ? this.darkenColor(recipe.color, 0.15) : 'rgba(38, 32, 52, 0.92)';
       ctx.fill();
 
       ctx.shadowBlur = 0;
 
-      // Border
+      // Border accented with recipe color
       roundRect(ctx, rect.x, rect.y, rect.width, rect.height, 10);
-      ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-      ctx.lineWidth = 1;
+      ctx.strokeStyle = hover && !disabled ? '#FCA311' : recipe.color;
+      ctx.lineWidth = hover && !disabled ? 2 : 1.5;
       ctx.stroke();
+
+      // Pixel art food sprite centered on top half of card
+      ctx.imageSmoothingEnabled = false;
+      const foodKey = `food_${recipe.id}`;
+      if (this.engine.assets.hasImage(foodKey)) {
+        ctx.drawImage(
+          this.engine.assets.getImage(foodKey),
+          rect.x + (rect.width - 52) / 2,
+          rect.y + 4,
+          52,
+          52,
+        );
+      }
 
       // Recipe name
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = 'bold 15px "Segoe UI", system-ui, sans-serif';
-      drawTextShadow(ctx, recipe.name, rect.x + rect.width / 2, rect.y + 28);
+      ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, recipe.name, rect.x + rect.width / 2, rect.y + 66);
 
-      // English name
-      ctx.font = '11px "Segoe UI", system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.6)';
-      ctx.fillText(recipe.nameEn, rect.x + rect.width / 2, rect.y + 48);
-
-      // Price
-      ctx.font = 'bold 14px monospace';
-      drawTextShadow(ctx, `${formatMoney(recipe.basePrice)}`, rect.x + rect.width / 2, rect.y + 70, '#4CAF50');
-
-      // Steps count
-      ctx.font = '10px "Segoe UI"';
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
-      ctx.fillText(`${recipe.steps.length} bước`, rect.x + rect.width / 2, rect.y + 88);
+      // Price & step count row
+      ctx.font = 'bold 12px monospace';
+      drawTextShadow(
+        ctx,
+        `${formatMoney(recipe.basePrice)} • ${recipe.steps.length} bước`,
+        rect.x + rect.width / 2,
+        rect.y + 86,
+        '#4CAF50',
+      );
 
       ctx.restore();
     }

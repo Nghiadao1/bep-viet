@@ -135,13 +135,41 @@ export class MenuScene implements Scene {
     const W = 960;
     const H = 540;
 
-    // --- Background gradient ---
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#1a1a2e');
-    grad.addColorStop(0.5, '#16213e');
-    grad.addColorStop(1, '#0f3460');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+    // --- Pixel art Sài Gòn background ---
+    if (this.engine.assets.hasImage('bg_saigon')) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.engine.assets.getImage('bg_saigon'), 0, 0, W, H);
+      // Warm atmospheric dark vignette so menu title & buttons pop clearly
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, 'rgba(17, 19, 38, 0.55)');
+      grad.addColorStop(0.5, 'rgba(22, 24, 48, 0.45)');
+      grad.addColorStop(1, 'rgba(15, 16, 30, 0.72)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    } else {
+      const grad = ctx.createLinearGradient(0, 0, 0, H);
+      grad.addColorStop(0, '#1a1a2e');
+      grad.addColorStop(0.5, '#16213e');
+      grad.addColorStop(1, '#0f3460');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, W, H);
+    }
+
+    // --- Showcase floating pixel art Vietnamese dishes flanking the menu ---
+    const showcaseDishes: Array<{ key: string; x: number; y: number; phase: number }> = [
+      { key: 'food_pho_bo', x: 110, y: 170, phase: 0 },
+      { key: 'food_banh_mi_thit', x: 170, y: 315, phase: 1.2 },
+      { key: 'food_ca_phe_sua_da', x: 95, y: 420, phase: 2.4 },
+      { key: 'food_com_tam', x: 770, y: 175, phase: 0.7 },
+      { key: 'food_bun_bo_hue', x: 715, y: 315, phase: 1.9 },
+      { key: 'food_che_ba_mau', x: 790, y: 420, phase: 3.1 },
+    ];
+    ctx.imageSmoothingEnabled = false;
+    for (const item of showcaseDishes) {
+      if (!this.engine.assets.hasImage(item.key)) continue;
+      const bobY = Math.sin(this.glowPhase * 2 + item.phase) * 6;
+      ctx.drawImage(this.engine.assets.getImage(item.key), item.x, item.y + bobY, 80, 80);
+    }
 
     // --- Steam particles ---
     for (const p of this.particles) {
