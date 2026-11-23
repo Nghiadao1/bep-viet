@@ -17,10 +17,10 @@ export class MapScene implements Scene {
   private view: MapView = 'chapters';
   private selectedChapter = 0;
 
-  // Click regions
+  // Click regions (generous touch sizes for mobile)
   private chapterRects: Rect[] = [];
   private levelRects: Rect[] = [];
-  private backBtn: Rect = { x: 20, y: 16, width: 100, height: 40 };
+  private backBtn: Rect = { x: 20, y: 14, width: 128, height: 46 };
 
   private removeClick?: () => void;
 
@@ -119,11 +119,11 @@ export class MapScene implements Scene {
     ctx.font = 'bold 32px "Segoe UI", system-ui, sans-serif';
     drawTextShadow(ctx, '🗺 Bản đồ Việt Nam', W / 2, 46, '#FCA311');
 
-    // Map layout: 5 chapter boxes arranged vertically (Vietnam is tall)
-    const boxW = 200;
-    const boxH = 80;
+    // Map layout: 5 chapter boxes arranged vertically (touch-friendly width)
+    const boxW = 280;
+    const boxH = 82;
     const startX = W / 2 - boxW / 2;
-    const startY = 80;
+    const startY = 78;
     const gap = 8;
 
     // Map background silhouette
@@ -211,12 +211,12 @@ export class MapScene implements Scene {
     ctx.font = 'bold 28px "Segoe UI", system-ui, sans-serif';
     drawTextShadow(ctx, `${chapter.name} — ${chapter.region}`, W / 2, 46, chapter.color);
 
-    // Grid of level circles: 5 columns × 2 rows
+    // Grid of level circles: 5 columns × 2 rows (larger tap radius for mobile)
     const cols = 5;
     const rows = 2;
-    const circR = 30;
-    const gapX = 100;
-    const gapY = 100;
+    const circR = 36;
+    const gapX = 128;
+    const gapY = 122;
     const gridW = (cols - 1) * gapX;
     const gridH = (rows - 1) * gapY;
     const startX = W / 2 - gridW / 2;

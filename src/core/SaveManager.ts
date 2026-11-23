@@ -17,6 +17,7 @@ function createDefaultSave(): SaveData {
     levelStars: {},
     upgrades: {},
     unlockedRecipes: ['pho_bo'],
+    tutorialCompleted: false,
     settings: {
       musicVolume: 0.5,
       sfxVolume: 0.7,

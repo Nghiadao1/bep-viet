@@ -18,11 +18,11 @@ export class RecipeBookScene implements Scene {
   private page = 0;
   private unlocked: typeof RECIPES = [];
 
-  // Rects
+  // Rects (touch-friendly sizing)
   private recipeListRects: Rect[] = [];
-  private backBtn: Rect = { x: 20, y: 16, width: 100, height: 40 };
-  private prevBtn: Rect = { x: 30, y: 480, width: 80, height: 36 };
-  private nextBtn: Rect = { x: 300, y: 480, width: 80, height: 36 };
+  private backBtn: Rect = { x: 20, y: 14, width: 128, height: 46 };
+  private prevBtn: Rect = { x: 30, y: 478, width: 104, height: 44 };
+  private nextBtn: Rect = { x: 266, y: 478, width: 104, height: 44 };
 
   private removeClick?: () => void;
 

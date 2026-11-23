@@ -9,6 +9,7 @@ import { roundRect, drawTextShadow } from '../utils/draw';
 import { randFloat, randInt } from '../utils/math';
 import { MapScene } from './MapScene';
 import { RecipeBookScene } from './RecipeBookScene';
+import { isFullscreen, supportsFullscreen, toggleFullscreen } from '../utils/mobile';
 
 interface SteamParticle {
   x: number;
@@ -30,6 +31,7 @@ export class MenuScene implements Scene {
   private engine: Engine;
   private particles: SteamParticle[] = [];
   private buttons: MenuButton[] = [];
+  private fullscreenBtn: Rect = { x: 800, y: 16, width: 144, height: 42 };
   private removeClick?: () => void;
   private glowPhase = 0;
   private soundEnabled: boolean;
@@ -49,12 +51,12 @@ export class MenuScene implements Scene {
       this.particles.push(this.createParticle(true));
     }
 
-    // Create buttons
+    // Create large mobile-friendly touch buttons
     const cx = 480;
-    const btnW = 240;
-    const btnH = 50;
+    const btnW = 280;
+    const btnH = 56;
     const btnGap = 16;
-    const startY = 310;
+    const startY = 296;
 
     this.buttons = [
       {
@@ -79,19 +81,24 @@ export class MenuScene implements Scene {
 
     // Input handling
     this.removeClick = this.engine.input.onClick((pos) => {
+      // Fullscreen toggle (mobile convenience)
+      if (supportsFullscreen() && InputManager.hitTest(pos, this.fullscreenBtn, 8)) {
+        void toggleFullscreen();
+        return;
+      }
       // Play button → MapScene
-      if (InputManager.hitTest(pos, this.buttons[0].rect)) {
+      if (InputManager.hitTest(pos, this.buttons[0].rect, 4)) {
         this.engine.audio.init(); // init audio on first user gesture
         this.engine.scenes.replace(new MapScene(this.engine));
         return;
       }
       // Recipe book button → RecipeBookScene
-      if (InputManager.hitTest(pos, this.buttons[1].rect)) {
+      if (InputManager.hitTest(pos, this.buttons[1].rect, 4)) {
         this.engine.scenes.replace(new RecipeBookScene(this.engine));
         return;
       }
       // Settings button → toggle sound
-      if (InputManager.hitTest(pos, this.buttons[2].rect)) {
+      if (InputManager.hitTest(pos, this.buttons[2].rect, 4)) {
         this.engine.audio.toggleMute();
         this.soundEnabled = !this.engine.audio.muted;
         this.buttons[2].label = this.soundEnabled ? '🔊 Âm thanh: BẬT' : '🔇 Âm thanh: TẮT';
@@ -248,6 +255,29 @@ export class MenuScene implements Scene {
         '#fff',
         'rgba(0,0,0,0.3)',
         1,
+      );
+    }
+
+    // --- Fullscreen button (top-right for mobile landscape play) ---
+    if (supportsFullscreen()) {
+      const fs = this.fullscreenBtn;
+      const fsHover = InputManager.hitTest(this.engine.input.pointer, fs);
+      roundRect(ctx, fs.x, fs.y, fs.width, fs.height, 10);
+      ctx.fillStyle = fsHover ? 'rgba(252,163,17,0.3)' : 'rgba(17,19,38,0.65)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(252,163,17,0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(
+        ctx,
+        isFullscreen() ? '⛶ Thu nhỏ' : '⛶ Toàn màn hình',
+        fs.x + fs.width / 2,
+        fs.y + fs.height / 2,
+        '#fff',
       );
     }
 

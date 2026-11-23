@@ -127,6 +127,7 @@ export interface SaveData {
   levelStars: Record<number, number>;
   upgrades: Record<string, number>; // upgrade ID → level
   unlockedRecipes: string[];
+  tutorialCompleted: boolean;
   settings: GameSettings;
   stats: PlayerStats;
 }

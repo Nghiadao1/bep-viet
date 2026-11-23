@@ -87,14 +87,14 @@ export class ResultScene implements Scene {
     this.tweens.to(this.servedDisplay, { value: this.data.customersServed }, 800, 'easeOutQuad');
     this.tweens.to(this.comboDisplay, { value: this.data.maxCombo }, 600, 'easeOutQuad');
 
-    // Setup buttons
+    // Setup touch-friendly buttons
     const cx = 480;
-    const btnW = 180;
-    const btnH = 44;
-    const btnGap = 14;
+    const btnW = 200;
+    const btnH = 52;
+    const btnGap = 18;
     const totalW = 3 * btnW + 2 * btnGap;
     const startX = cx - totalW / 2;
-    const btnY = 440;
+    const btnY = 434;
 
     this.buttons = [
       {

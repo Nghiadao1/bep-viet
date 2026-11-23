@@ -1,0 +1,17 @@
+{
+  "name": "Bếp Việt — Vietnamese Street Kitchen",
+  "short_name": "Bếp Việt",
+  "description": "Game nấu ăn đường phố Việt Nam — Phở, Bánh Mì, Cơm Tấm, Bún Bò Huế...",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#111326",
+  "theme_color": "#111326",
+  "icons": [
+    {
+      "src": "./sprites/food/pho_bo.png",
+      "sizes": "128x128",
+      "type": "image/png"
+    }
+  ]
+}
