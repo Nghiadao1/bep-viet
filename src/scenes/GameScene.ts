@@ -13,6 +13,7 @@ import { getLevel } from '../data/levels';
 import { ResultScene } from './ResultScene';
 import { MapScene } from './MapScene';
 import { supportsFullscreen, toggleFullscreen } from '../utils/mobile';
+import { TutorialSystem, type TutorialTarget } from '../systems/TutorialSystem';
 
 // ---- Inline entity types (self-contained vertical slice) ----
 
@@ -112,12 +113,10 @@ export class GameScene implements Scene {
   private cancelDishBtn: Rect = { x: 850, y: 357, width: 84, height: 34 };
   private resumeBtn: Rect = { x: 318, y: 290, width: 156, height: 52 };
   private exitMapBtn: Rect = { x: 486, y: 290, width: 156, height: 52 };
-  private tutorialSkipBtn: Rect = { x: 772, y: 54, width: 82, height: 30 };
 
-  // First-time guided tutorial (Level 1)
-  private tutorialStage: 'none' | 'pick_recipe' | 'tap_first_station' | 'finish_steps' | 'done' = 'none';
-  private tutorialElapsed = 0;
-  private tutorialDoneTimer = 0;
+  // 2-Cat NPC Tutorial System
+  private tutorial: TutorialSystem;
+  private forceTutorial: boolean;
 
   // Input
   private removeClick?: () => void;
@@ -131,9 +130,11 @@ export class GameScene implements Scene {
   private stationFlashTimer = 0;
   private stationFlashIndex = -1;
 
-  constructor(engine: Engine, levelId: number) {
+  constructor(engine: Engine, levelId: number, forceTutorial = false) {
     this.engine = engine;
     this.levelId = levelId;
+    this.forceTutorial = forceTutorial;
+    this.tutorial = new TutorialSystem(engine);
   }
 
   enter(): void {
@@ -170,12 +171,9 @@ export class GameScene implements Scene {
     this.customers = [];
     this.nextCustomerId = 0;
     this.spawnTimer = 500; // first spawn shortly after starting
-    this.tutorialElapsed = 0;
-    this.tutorialDoneTimer = 0;
-    this.tutorialStage =
-      this.levelId === 1 && !this.engine.save.current.tutorialCompleted
-        ? 'pick_recipe'
-        : 'none';
+    if (this.forceTutorial || (this.levelId === 1 && !this.engine.save.current.tutorialCompleted)) {
+      this.tutorial.start();
+    }
 
     // Resolve available recipes
     this.recipes = [];
@@ -271,14 +269,8 @@ export class GameScene implements Scene {
         return;
       }
 
-      // Skip tutorial button
-      if (
-        this.tutorialStage !== 'none' &&
-        this.tutorialStage !== 'done' &&
-        InputManager.hitTest(pos, this.tutorialSkipBtn, 8)
-      ) {
-        this.tutorialStage = 'none';
-        this.engine.save.update({ tutorialCompleted: true });
+      // Let Cat NPC tutorial handle modal taps & skip button first
+      if (this.tutorial.handleClick(pos)) {
         return;
       }
 
@@ -331,9 +323,7 @@ export class GameScene implements Scene {
       completed: false,
     };
     this.showFeedback(`🍳 ${recipe.name} — Bước 1: ${recipe.steps[0].action}`, '#FCA311');
-    if (this.tutorialStage === 'pick_recipe') {
-      this.tutorialStage = 'tap_first_station';
-    }
+    this.tutorial.onDishStarted();
     for (let i = 0; i < this.stations.length; i++) {
       if (this.stations[i].type === recipe.steps[0].stationType) {
         this.stationFlashIndex = i;
@@ -368,9 +358,12 @@ export class GameScene implements Scene {
     station.cookDuration = currentStep.duration / 1000; // convert ms to seconds
     station.currentStep = currentStep;
 
-    if (this.tutorialStage === 'tap_first_station') {
-      this.tutorialStage = 'finish_steps';
-    }
+    const nextIdx = dish.currentStepIndex + 1;
+    const nextLabel =
+      nextIdx < dish.steps.length
+        ? STATION_LABELS[dish.steps[nextIdx].stationType]
+        : undefined;
+    this.tutorial.onStationCookStarted(nextLabel);
 
     this.showFeedback(`🔥 ${currentStep.action}...`, '#4CAF50');
   }
@@ -387,6 +380,7 @@ export class GameScene implements Scene {
       this.serveDish(dish);
     } else {
       const nextStep = dish.steps[dish.currentStepIndex];
+      this.tutorial.setDynamicHint(STATION_LABELS[nextStep.stationType]);
       this.showFeedback(
         `✅ Bước ${dish.currentStepIndex + 1}: ${nextStep.action}`,
         '#4CAF50',
@@ -428,12 +422,7 @@ export class GameScene implements Scene {
       if (this.combo > this.maxCombo) this.maxCombo = this.combo;
 
       this.showFeedback(`💰 +${formatMoney(earned)}! Combo x${this.combo}`, '#4CAF50');
-
-      if (this.tutorialStage !== 'none' && this.tutorialStage !== 'done') {
-        this.tutorialStage = 'done';
-        this.tutorialDoneTimer = 2.6;
-        this.engine.save.update({ tutorialCompleted: true });
-      }
+      this.tutorial.onFirstCustomerServed();
     } else {
       // No matching customer — wasted dish
       this.showFeedback(`😢 Không có khách đặt ${dish.recipe.name}!`, '#E63946');
@@ -499,12 +488,20 @@ export class GameScene implements Scene {
   update(dt: number): void {
     if (this.gameOver || this.paused) return;
 
-    // Timer
-    this.timeRemaining -= dt;
-    if (this.timeRemaining <= 0) {
-      this.timeRemaining = 0;
-      this.endGame();
-      return;
+    // Always animate Cat NPC tutorial
+    this.tutorial.update(dt);
+
+    // Pause gameplay timers & spawning while visual-novel intro/celebration modal is open
+    if (this.tutorial.isModalBlocking) return;
+
+    // Level timer (frozen during initial guided prompts so player can read safely)
+    if (!this.tutorial.shouldFreezeTimers) {
+      this.timeRemaining -= dt;
+      if (this.timeRemaining <= 0) {
+        this.timeRemaining = 0;
+        this.endGame();
+        return;
+      }
     }
 
     // Spawn customers
@@ -565,9 +562,7 @@ export class GameScene implements Scene {
       }
 
       // Only start patience countdown once customer arrives (and pause during initial tutorial prompts)
-      const freezePatience =
-        this.tutorialStage === 'pick_recipe' || this.tutorialStage === 'tap_first_station';
-      if (c.x <= c.targetX && !freezePatience) {
+      if (c.x <= c.targetX && !this.tutorial.shouldFreezeTimers) {
         c.patience -= dt;
       }
       const ratio = c.patience / c.maxPatience;
@@ -591,17 +586,6 @@ export class GameScene implements Scene {
     // Station flash
     if (this.stationFlashTimer > 0) {
       this.stationFlashTimer -= dt;
-    }
-
-    // Tutorial animation clock
-    if (this.tutorialStage !== 'none') {
-      this.tutorialElapsed += dt;
-      if (this.tutorialStage === 'done') {
-        this.tutorialDoneTimer -= dt;
-        if (this.tutorialDoneTimer <= 0) {
-          this.tutorialStage = 'none';
-        }
-      }
     }
   }
 
@@ -677,11 +661,6 @@ export class GameScene implements Scene {
     // --- Recipe cards ---
     this.renderRecipeCards(ctx);
 
-    // --- Guided Tutorial Overlay (Level 1 first-time) ---
-    if (this.tutorialStage !== 'none') {
-      this.renderTutorial(ctx, W);
-    }
-
     // --- Feedback ---
     if (this.feedbackTimer > 0) {
       const alpha = Math.min(1, this.feedbackTimer);
@@ -693,6 +672,11 @@ export class GameScene implements Scene {
       ctx.globalAlpha = alpha;
       ctx.fillText(this.feedbackText, W / 2, 190);
       ctx.restore();
+    }
+
+    // --- 2-Cat NPC Tutorial Overlay (drawn above gameplay, below Pause) ---
+    if (this.tutorial.isActive) {
+      this.tutorial.render(ctx, W, H, this.getTutorialTarget());
     }
 
     // --- Pause overlay ---
@@ -765,84 +749,21 @@ export class GameScene implements Scene {
     ctx.fillText(this.paused ? '▶' : '⏸', this.pauseBtn.x + this.pauseBtn.width / 2, this.pauseBtn.y + this.pauseBtn.height / 2);
   }
 
-  private renderTutorial(ctx: CanvasRenderingContext2D, W: number): void {
-    const bob = Math.sin(this.tutorialElapsed * 7) * 6;
-    let message = '';
-    let arrowTarget: { x: number; y: number } | null = null;
-
-    if (this.tutorialStage === 'pick_recipe') {
-      message = '👋 Bước 1: Chạm vào thẻ Phở Bò bên dưới để bắt đầu nấu!';
+  private getTutorialTarget(): TutorialTarget | null {
+    const stage = this.tutorial.currentStage;
+    if (stage === 'pick_recipe') {
       const card = this.recipeCards[0];
-      if (card) {
-        arrowTarget = { x: card.rect.x + card.rect.width / 2, y: card.rect.y - 16 };
-      }
-    } else if (this.tutorialStage === 'tap_first_station') {
-      message = '🔥 Bước 2: Chạm trạm có viền vàng sáng để nấu bước đầu tiên!';
-      const nextType = this.activeDish?.steps[this.activeDish.currentStepIndex]?.stationType;
-      const st = this.stations.find((s) => s.type === nextType);
-      if (st) {
-        arrowTarget = { x: st.x + st.width / 2, y: st.y - 16 };
-      }
-    } else if (this.tutorialStage === 'finish_steps') {
+      return card ? { rect: card.rect } : null;
+    }
+    if (stage === 'tap_first_station' || stage === 'finish_steps') {
       const nextStep = this.activeDish?.steps[this.activeDish.currentStepIndex];
-      message = nextStep
-        ? `⚡ Tiếp tục chạm trạm sáng (${STATION_LABELS[nextStep.stationType]}) — xong món sẽ tự phục vụ khách!`
-        : '⚡ Hoàn thành các bước để phục vụ khách hàng đầu tiên!';
-      const st = this.stations.find((s) => s.type === nextStep?.stationType);
+      if (!nextStep) return null;
+      const st = this.stations.find((s) => s.type === nextStep.stationType);
       if (st && st.state !== 'cooking') {
-        arrowTarget = { x: st.x + st.width / 2, y: st.y - 16 };
+        return { rect: { x: st.x, y: st.y, width: st.width, height: st.height } };
       }
-    } else if (this.tutorialStage === 'done') {
-      message = '🎉 Tuyệt đỉnh! Bạn đã phục vụ thành công món Phở đầu tiên!';
     }
-
-    if (!message) return;
-
-    ctx.save();
-
-    // Sleek floating tutorial banner right beneath the top HUD bar
-    const bannerW = 760;
-    const bannerH = 34;
-    const bannerX = (W - bannerW) / 2;
-    const bannerY = 52;
-
-    roundRect(ctx, bannerX, bannerY, bannerW, bannerH, 12);
-    ctx.fillStyle = this.tutorialStage === 'done'
-      ? 'rgba(34, 139, 76, 0.94)'
-      : 'rgba(17, 19, 38, 0.92)';
-    ctx.fill();
-    ctx.strokeStyle = '#FCA311';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'middle';
-    ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, message, bannerX + 16, bannerY + bannerH / 2, '#fff');
-
-    // Skip button (except on celebration)
-    if (this.tutorialStage !== 'done') {
-      const skip = this.tutorialSkipBtn;
-      roundRect(ctx, skip.x, skip.y, skip.width, skip.height, 8);
-      ctx.fillStyle = 'rgba(255,255,255,0.16)';
-      ctx.fill();
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
-      ctx.fillStyle = '#FCA311';
-      ctx.fillText('Bỏ qua ✕', skip.x + skip.width / 2, skip.y + skip.height / 2);
-    }
-
-    // Animated bouncing pointer arrow directly above target tap element
-    if (arrowTarget) {
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = '30px "Segoe UI"';
-      ctx.shadowColor = 'rgba(0,0,0,0.6)';
-      ctx.shadowBlur = 6;
-      ctx.fillText('👇', arrowTarget.x, arrowTarget.y + bob);
-    }
-
-    ctx.restore();
+    return null;
   }
 
   private renderCustomers(ctx: CanvasRenderingContext2D): void {

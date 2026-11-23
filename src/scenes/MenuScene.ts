@@ -9,6 +9,7 @@ import { roundRect, drawTextShadow } from '../utils/draw';
 import { randFloat, randInt } from '../utils/math';
 import { MapScene } from './MapScene';
 import { RecipeBookScene } from './RecipeBookScene';
+import { GameScene } from './GameScene';
 import { isFullscreen, supportsFullscreen, toggleFullscreen } from '../utils/mobile';
 
 interface SteamParticle {
@@ -54,26 +55,32 @@ export class MenuScene implements Scene {
     // Create large mobile-friendly touch buttons
     const cx = 480;
     const btnW = 280;
-    const btnH = 56;
-    const btnGap = 16;
-    const startY = 296;
+    const btnH = 48;
+    const btnGap = 12;
+    const startY = 276;
 
     this.buttons = [
       {
-        label: '▶ Chơi',
+        label: '▶ Chơi (Bản đồ VN)',
         rect: { x: cx - btnW / 2, y: startY, width: btnW, height: btnH },
         color: '#E85D04',
         hoverColor: '#F48C06',
       },
       {
-        label: '📖 Công Thức',
+        label: '🐾 Hướng dẫn cùng Mèo',
         rect: { x: cx - btnW / 2, y: startY + btnH + btnGap, width: btnW, height: btnH },
+        color: '#D97706',
+        hoverColor: '#F59E0B',
+      },
+      {
+        label: '📖 Công Thức',
+        rect: { x: cx - btnW / 2, y: startY + (btnH + btnGap) * 2, width: btnW, height: btnH },
         color: '#2A9D8F',
         hoverColor: '#3AC4B4',
       },
       {
         label: this.soundEnabled ? '🔊 Âm thanh: BẬT' : '🔇 Âm thanh: TẮT',
-        rect: { x: cx - btnW / 2, y: startY + (btnH + btnGap) * 2, width: btnW, height: btnH },
+        rect: { x: cx - btnW / 2, y: startY + (btnH + btnGap) * 3, width: btnW, height: btnH },
         color: '#6C757D',
         hoverColor: '#868E96',
       },
@@ -86,22 +93,28 @@ export class MenuScene implements Scene {
         void toggleFullscreen();
         return;
       }
-      // Play button → MapScene
+      // Play button → Vietnam MapScene
       if (InputManager.hitTest(pos, this.buttons[0].rect, 4)) {
-        this.engine.audio.init(); // init audio on first user gesture
+        this.engine.audio.init();
         this.engine.scenes.replace(new MapScene(this.engine));
         return;
       }
-      // Recipe book button → RecipeBookScene
+      // Tutorial button → Level 1 with 2-Cat NPC Tutorial
       if (InputManager.hitTest(pos, this.buttons[1].rect, 4)) {
+        this.engine.audio.init();
+        this.engine.scenes.replace(new GameScene(this.engine, 1, true));
+        return;
+      }
+      // Recipe book button → RecipeBookScene
+      if (InputManager.hitTest(pos, this.buttons[2].rect, 4)) {
         this.engine.scenes.replace(new RecipeBookScene(this.engine));
         return;
       }
       // Settings button → toggle sound
-      if (InputManager.hitTest(pos, this.buttons[2].rect, 4)) {
+      if (InputManager.hitTest(pos, this.buttons[3].rect, 4)) {
         this.engine.audio.toggleMute();
         this.soundEnabled = !this.engine.audio.muted;
-        this.buttons[2].label = this.soundEnabled ? '🔊 Âm thanh: BẬT' : '🔇 Âm thanh: TẮT';
+        this.buttons[3].label = this.soundEnabled ? '🔊 Âm thanh: BẬT' : '🔇 Âm thanh: TẮT';
       }
     });
   }

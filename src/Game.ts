@@ -36,6 +36,8 @@ export class Game {
     const assets = this.engine.assets;
     const images: Record<string, string> = {
       bg_saigon: './sprites/backgrounds/saigon_night.png',
+      npc_cat_boss: './sprites/npc/cat_boss.png',
+      npc_cat_golden: './sprites/npc/cat_golden.png',
     };
 
     // All 10 kitchen stations
