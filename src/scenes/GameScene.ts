@@ -14,6 +14,14 @@ import { ResultScene } from './ResultScene';
 import { MapScene } from './MapScene';
 import { supportsFullscreen, toggleFullscreen } from '../utils/mobile';
 import { TutorialSystem, type TutorialTarget } from '../systems/TutorialSystem';
+import { CatCompanionSystem } from '../systems/CatCompanionSystem';
+import {
+  generateCustomerTaste,
+  formatTasteSpeech,
+  type CustomerTasteOrder,
+} from '../data/tastes';
+import { createMinigameForStep } from '../minigames/MinigameFactory';
+import type { CookingMinigame } from '../minigames/types';
 
 // ---- Inline entity types (self-contained vertical slice) ----
 
@@ -42,9 +50,11 @@ interface InlineCustomer {
   patience: number;
   maxPatience: number;
   order: Recipe;
+  taste: CustomerTasteOrder;
   mood: CustomerMood;
   served: boolean;
   leaving: boolean;
+  warnedImpatient: boolean;
   orderBubbleAlpha: number;
 }
 
@@ -52,6 +62,7 @@ interface ActiveDish {
   recipe: Recipe;
   currentStepIndex: number;
   steps: CookingStep[];
+  stepScores: number[];
   completed: boolean;
 }
 
@@ -114,12 +125,20 @@ export class GameScene implements Scene {
   private resumeBtn: Rect = { x: 318, y: 290, width: 156, height: 52 };
   private exitMapBtn: Rect = { x: 486, y: 290, width: 156, height: 52 };
 
-  // 2-Cat NPC Tutorial System
+  // 2-Cat NPC Tutorial & Live Interactive Cat Companion
   private tutorial: TutorialSystem;
+  private cats: CatCompanionSystem;
   private forceTutorial: boolean;
 
-  // Input
+  // Interactive Cooking Minigame
+  private activeMinigame: CookingMinigame | null = null;
+  private activeStationIndex = -1;
+
+  // Input listeners
   private removeClick?: () => void;
+  private removeDown?: () => void;
+  private removeMove?: () => void;
+  private removeUp?: () => void;
 
   // Feedback
   private feedbackText = '';
@@ -135,6 +154,7 @@ export class GameScene implements Scene {
     this.levelId = levelId;
     this.forceTutorial = forceTutorial;
     this.tutorial = new TutorialSystem(engine);
+    this.cats = new CatCompanionSystem(engine);
   }
 
   enter(): void {
@@ -168,9 +188,12 @@ export class GameScene implements Scene {
     this.paused = false;
     this.gameOver = false;
     this.activeDish = null;
+    this.activeMinigame = null;
+    this.activeStationIndex = -1;
     this.customers = [];
     this.nextCustomerId = 0;
     this.spawnTimer = 500; // first spawn shortly after starting
+    this.cats.say('boss', 'Sẵn sàng nổi lửa chưa? Chờ khách vào gọi món nhé! 🔥', 4.0);
     if (this.forceTutorial || (this.levelId === 1 && !this.engine.save.current.tutorialCompleted)) {
       this.tutorial.start();
     }
@@ -241,6 +264,28 @@ export class GameScene implements Scene {
       });
     }
 
+    // Pointer drag/hold listeners for interactive cooking minigames
+    this.removeDown = this.engine.input.onDown((pos) => {
+      if (this.gameOver || this.paused) return;
+      if (this.activeMinigame) {
+        this.activeMinigame.onDown?.(pos);
+      }
+    });
+
+    this.removeMove = this.engine.input.onMove((pos) => {
+      if (this.gameOver || this.paused) return;
+      if (this.activeMinigame) {
+        this.activeMinigame.onMove?.(pos);
+      }
+    });
+
+    this.removeUp = this.engine.input.onUp((pos) => {
+      if (this.gameOver || this.paused) return;
+      if (this.activeMinigame) {
+        this.activeMinigame.onUp?.(pos);
+      }
+    });
+
     // Input (generous mobile touch padding on all interactive elements)
     this.removeClick = this.engine.input.onClick((pos) => {
       if (this.gameOver) return;
@@ -269,8 +314,19 @@ export class GameScene implements Scene {
         return;
       }
 
+      // Active cooking minigame consumes clicks while open
+      if (this.activeMinigame) {
+        this.activeMinigame.onClick?.(pos);
+        return;
+      }
+
       // Let Cat NPC tutorial handle modal taps & skip button first
       if (this.tutorial.handleClick(pos)) {
+        return;
+      }
+
+      // Pet / tap the 2 resident Cat NPCs in the Cat Booth!
+      if (this.cats.handleClick(pos)) {
         return;
       }
 
@@ -283,6 +339,7 @@ export class GameScene implements Scene {
         }
         this.activeDish = null;
         this.showFeedback('🗑 Đã hủy món', '#FCA311');
+        this.cats.say('golden', 'Hủy món rồi, chọn lại món khách cần nhé!');
         return;
       }
 
@@ -296,7 +353,7 @@ export class GameScene implements Scene {
         }
       }
 
-      // Click station → cook current step
+      // Click station → launch interactive cooking minigame!
       if (this.activeDish && !this.activeDish.completed) {
         for (let i = 0; i < this.stations.length; i++) {
           const st = this.stations[i];
@@ -312,7 +369,13 @@ export class GameScene implements Scene {
 
   exit(): void {
     this.removeClick?.();
+    this.removeDown?.();
+    this.removeMove?.();
+    this.removeUp?.();
     this.removeClick = undefined;
+    this.removeDown = undefined;
+    this.removeMove = undefined;
+    this.removeUp = undefined;
   }
 
   private startDish(recipe: Recipe): void {
@@ -320,10 +383,12 @@ export class GameScene implements Scene {
       recipe,
       currentStepIndex: 0,
       steps: [...recipe.steps],
+      stepScores: [],
       completed: false,
     };
     this.showFeedback(`🍳 ${recipe.name} — Bước 1: ${recipe.steps[0].action}`, '#FCA311');
     this.tutorial.onDishStarted();
+    this.cats.say('golden', `Bắt đầu làm ${recipe.name}! Chạm trạm ${STATION_LABELS[recipe.steps[0].stationType]} nhé!`, 3.5);
     for (let i = 0; i < this.stations.length; i++) {
       if (this.stations[i].type === recipe.steps[0].stationType) {
         this.stationFlashIndex = i;
@@ -333,30 +398,46 @@ export class GameScene implements Scene {
     }
   }
 
+  private findMatchingCustomer(recipeId: string): InlineCustomer | null {
+    for (const c of this.customers) {
+      if (!c.served && !c.leaving && c.order.id === recipeId) {
+        return c;
+      }
+    }
+    return null;
+  }
+
   private handleStationClick(stationIndex: number): void {
     const station = this.stations[stationIndex];
     const dish = this.activeDish;
-    if (!dish || dish.completed) return;
+    if (!dish || dish.completed || this.activeMinigame) return;
 
     const currentStep = dish.steps[dish.currentStepIndex];
 
     // Check if this is the correct station
     if (station.type !== currentStep.stationType) {
       this.showFeedback(`❌ Sai trạm! Cần: ${STATION_LABELS[currentStep.stationType]}`, '#E63946');
+      this.cats.say('boss', `Nhầm trạm rồi! Đang cần ${STATION_LABELS[currentStep.stationType]} cơ mà! 😾`, 3.0);
       return;
     }
 
-    // Check if station is busy
-    if (station.state === 'cooking') {
-      this.showFeedback('⏳ Đang nấu...', '#FCA311');
-      return;
-    }
+    // Launch the tailored interactive cooking minigame for this step!
+    const matchingCustomer = this.findMatchingCustomer(dish.recipe.id);
+    const isLastStep = dish.currentStepIndex === dish.steps.length - 1;
 
-    // Start cooking at this station
     station.state = 'cooking';
-    station.cookTimer = 0;
-    station.cookDuration = currentStep.duration / 1000; // convert ms to seconds
     station.currentStep = currentStep;
+    this.activeStationIndex = stationIndex;
+
+    this.activeMinigame = createMinigameForStep(
+      {
+        engine: this.engine,
+        recipe: dish.recipe,
+        step: currentStep,
+        taste: matchingCustomer?.taste ?? null,
+      },
+      isLastStep,
+    );
 
     const nextIdx = dish.currentStepIndex + 1;
     const nextLabel =
@@ -364,8 +445,29 @@ export class GameScene implements Scene {
         ? STATION_LABELS[dish.steps[nextIdx].stationType]
         : undefined;
     this.tutorial.onStationCookStarted(nextLabel);
+  }
 
-    this.showFeedback(`🔥 ${currentStep.action}...`, '#4CAF50');
+  private completeActiveMinigame(): void {
+    const mg = this.activeMinigame;
+    if (!mg) return;
+
+    const res = mg.result;
+    const stIdx = this.activeStationIndex;
+    this.activeMinigame = null;
+    this.activeStationIndex = -1;
+
+    if (stIdx >= 0 && this.stations[stIdx]) {
+      this.stations[stIdx].state = 'done';
+      this.stations[stIdx].currentStep = null;
+      this.stations[stIdx].cookTimer = -0.35;
+    }
+
+    if (res && this.activeDish) {
+      this.activeDish.stepScores.push(res.score);
+      this.cats.say(res.catSpeaker, res.catComment, 4.0);
+    }
+
+    this.advanceDishStep();
   }
 
   private advanceDishStep(): void {
@@ -397,35 +499,46 @@ export class GameScene implements Scene {
   }
 
   private serveDish(dish: ActiveDish): void {
-    // Find matching customer
-    let target: InlineCustomer | null = null;
-    for (const c of this.customers) {
-      if (!c.served && !c.leaving && c.order.id === dish.recipe.id) {
-        target = c;
-        break;
-      }
-    }
+    const target = this.findMatchingCustomer(dish.recipe.id);
 
     if (target) {
       target.served = true;
       target.leaving = true;
       target.mood = CustomerMood.HAPPY;
 
-      // Calculate earnings
+      // Average minigame cooking quality (0.5..1.4x multiplier!)
+      const avgScore =
+        dish.stepScores.length > 0
+          ? dish.stepScores.reduce((a, b) => a + b, 0) / dish.stepScores.length
+          : 85;
+      const qualityMultiplier = avgScore >= 85 ? 1.4 : avgScore >= 60 ? 1.1 : 0.8;
+
+      // Patience tip multiplier
       const patienceRatio = target.patience / target.maxPatience;
-      const tipMultiplier = patienceRatio > 0.5 ? 1.5 : patienceRatio > 0.2 ? 1.0 : 0.7;
-      const earned = Math.floor(dish.recipe.basePrice * tipMultiplier);
+      const tipMultiplier = patienceRatio > 0.5 ? 1.5 : patienceRatio > 0.2 ? 1.0 : 0.75;
+      const earned = Math.floor(dish.recipe.basePrice * tipMultiplier * qualityMultiplier);
 
       this.money += earned;
       this.customersServed++;
       this.combo++;
       if (this.combo > this.maxCombo) this.maxCombo = this.combo;
 
-      this.showFeedback(`💰 +${formatMoney(earned)}! Combo x${this.combo}`, '#4CAF50');
+      const perfectTag = avgScore >= 85 ? ' ⭐ PERFECT!' : '';
+      this.showFeedback(`💰 +${formatMoney(earned)}${perfectTag} Combo x${this.combo}`, '#4CAF50');
+
+      if (this.combo >= 3) {
+        this.cats.say('both', `COMBO x${this.combo}!! Quán đông nghẹt khách khen nức nở! 🔥⭐`, 4.2);
+      } else if (avgScore >= 85) {
+        this.cats.say('boss', `Quá xuất sắc! Khách thưởng đậm +${formatMoney(earned)}! 👑`, 4.0);
+      } else {
+        this.cats.say('golden', `Đã bưng ${dish.recipe.name} ra cho khách! +${formatMoney(earned)}! 🍜`, 3.8);
+      }
+
       this.tutorial.onFirstCustomerServed();
     } else {
       // No matching customer — wasted dish
       this.showFeedback(`😢 Không có khách đặt ${dish.recipe.name}!`, '#E63946');
+      this.cats.say('boss', `Nấu nhầm món rồi! Chưa có khách gọi ${dish.recipe.name}! 😿`, 3.6);
       this.combo = 0;
     }
 
@@ -437,8 +550,9 @@ export class GameScene implements Scene {
     if (this.recipes.length === 0) return false;
 
     const recipe = randPick(this.recipes);
+    const taste = generateCustomerTaste(recipe);
     const slot = this.getNextCustomerSlot();
-    const patience = randFloat(22, 32);
+    const patience = randFloat(34, 46); // generous patience for tactile minigames!
     const pool =
       this.levelConfig.customerTypes && this.levelConfig.customerTypes.length > 0
         ? this.levelConfig.customerTypes
@@ -451,23 +565,29 @@ export class GameScene implements Scene {
       x: 960 + 80, // start offscreen
       targetX: slot.x,
       y: slot.y,
-      width: 76,
-      height: 95,
+      width: 72,
+      height: 90,
       patience,
       maxPatience: patience,
       order: recipe,
+      taste,
       mood: CustomerMood.HAPPY,
       served: false,
       leaving: false,
+      warnedImpatient: false,
       orderBubbleAlpha: 0,
     };
 
     this.customers.push(customer);
+    if (!this.activeMinigame) {
+      this.cats.say('golden', `Khách mới gọi ${formatTasteSpeech(recipe, taste)}`, 4.5);
+    }
     return true;
   }
 
   private getNextCustomerSlot(): { x: number; y: number } {
-    const slots = [80, 240, 400, 560, 720];
+    // 5 neat slots across the left/center counter leaving right Cat Booth clear!
+    const slots = [34, 178, 322, 466, 610];
     const occupied = new Set(
       this.customers.filter((c) => !c.leaving).map((c) => c.targetX),
     );
@@ -476,7 +596,7 @@ export class GameScene implements Scene {
         return { x: sx, y: 80 };
       }
     }
-    return { x: clamp(80 + occupied.size * 150, 80, 760), y: 80 };
+    return { x: clamp(34 + occupied.size * 144, 34, 610), y: 80 };
   }
 
   private showFeedback(text: string, color: string): void {
@@ -488,15 +608,27 @@ export class GameScene implements Scene {
   update(dt: number): void {
     if (this.gameOver || this.paused) return;
 
-    // Always animate Cat NPC tutorial
+    // Always animate Cat NPC tutorial & Live Cat Companion
     this.tutorial.update(dt);
+    this.cats.update(dt);
 
     // Pause gameplay timers & spawning while visual-novel intro/celebration modal is open
     if (this.tutorial.isModalBlocking) return;
 
+    // Update active cooking minigame
+    if (this.activeMinigame) {
+      this.activeMinigame.update(dt);
+      if (this.activeMinigame.done) {
+        this.completeActiveMinigame();
+      }
+    }
+
+    // Slow down level & patience timers to 25% while focused inside a cooking minigame
+    const worldDt = this.activeMinigame ? dt * 0.25 : dt;
+
     // Level timer (frozen during initial guided prompts so player can read safely)
     if (!this.tutorial.shouldFreezeTimers) {
-      this.timeRemaining -= dt;
+      this.timeRemaining -= worldDt;
       if (this.timeRemaining <= 0) {
         this.timeRemaining = 0;
         this.endGame();
@@ -505,37 +637,19 @@ export class GameScene implements Scene {
     }
 
     // Spawn customers
-    this.spawnTimer -= dt * 1000;
+    this.spawnTimer -= worldDt * 1000;
     if (this.spawnTimer <= 0) {
       const spawned = this.spawnCustomer();
       this.spawnTimer = spawned ? this.levelConfig.customerSpawnRate : 1000;
     }
 
-    // Update stations
+    // Update station done cooldowns
     for (const station of this.stations) {
       if (station.state === 'done') {
-        // cookTimer is negative, counting up to 0
         station.cookTimer += dt;
         if (station.cookTimer >= 0) {
           station.state = 'idle';
           station.cookTimer = 0;
-        }
-      } else if (station.state === 'cooking') {
-        station.cookTimer += dt;
-        if (station.cookTimer >= station.cookDuration) {
-          station.state = 'done';
-          station.cookTimer = 0;
-          // Auto-advance dish step
-          if (
-            this.activeDish &&
-            station.currentStep &&
-            station.type === this.activeDish.steps[this.activeDish.currentStepIndex]?.stationType
-          ) {
-            this.advanceDishStep();
-          }
-          station.currentStep = null;
-          // Station will reset to idle after 0.3s via doneTimer
-          station.cookTimer = -0.3; // reuse cookTimer as done countdown
         }
       }
     }
@@ -563,18 +677,25 @@ export class GameScene implements Scene {
 
       // Only start patience countdown once customer arrives (and pause during initial tutorial prompts)
       if (c.x <= c.targetX && !this.tutorial.shouldFreezeTimers) {
-        c.patience -= dt;
+        c.patience -= worldDt;
       }
       const ratio = c.patience / c.maxPatience;
       if (ratio > 0.5) c.mood = CustomerMood.HAPPY;
-      else if (ratio > 0.2) c.mood = CustomerMood.NEUTRAL;
-      else c.mood = CustomerMood.ANGRY;
+      else if (ratio > 0.22) c.mood = CustomerMood.NEUTRAL;
+      else {
+        c.mood = CustomerMood.ANGRY;
+        if (!c.warnedImpatient) {
+          c.warnedImpatient = true;
+          this.cats.say('golden', `Á á khách gọi ${c.order.name} sắp hết kiên nhẫn rồi!! Nhanh tay lên!! 💦`, 3.5);
+        }
+      }
 
       if (c.patience <= 0) {
         c.leaving = true;
         c.mood = CustomerMood.ANGRY;
         this.combo = 0;
         this.showFeedback('😡 Khách bỏ đi!', '#E63946');
+        this.cats.say('boss', 'Khách đợi lâu quá bỏ đi mất rồi! Lần sau tăng tốc lên nhé! 😾', 3.5);
       }
     }
 
@@ -652,6 +773,11 @@ export class GameScene implements Scene {
     // --- Customers ---
     this.renderCustomers(ctx);
 
+    // --- Live Interactive Cat Kitchen Booth (Vằn Bếp Trưởng & Mèo Vàng Phụ Bếp) ---
+    if (!this.tutorial.isActive && !this.activeMinigame) {
+      this.cats.render(ctx);
+    }
+
     // --- Stations ---
     this.renderStations(ctx);
 
@@ -662,7 +788,7 @@ export class GameScene implements Scene {
     this.renderRecipeCards(ctx);
 
     // --- Feedback ---
-    if (this.feedbackTimer > 0) {
+    if (this.feedbackTimer > 0 && !this.activeMinigame) {
       const alpha = Math.min(1, this.feedbackTimer);
       ctx.save();
       ctx.textAlign = 'center';
@@ -670,12 +796,17 @@ export class GameScene implements Scene {
       ctx.font = 'bold 20px "Segoe UI", system-ui, sans-serif';
       ctx.fillStyle = this.feedbackColor;
       ctx.globalAlpha = alpha;
-      ctx.fillText(this.feedbackText, W / 2, 190);
+      ctx.fillText(this.feedbackText, W / 2, 194);
       ctx.restore();
     }
 
-    // --- 2-Cat NPC Tutorial Overlay (drawn above gameplay, below Pause) ---
-    if (this.tutorial.isActive) {
+    // --- Interactive Cooking Minigame Modal ---
+    if (this.activeMinigame) {
+      this.activeMinigame.render(ctx);
+    }
+
+    // --- 2-Cat NPC Tutorial Overlay (hidden briefly while playing a minigame) ---
+    if (this.tutorial.isActive && !this.activeMinigame) {
       this.tutorial.render(ctx, W, H, this.getTutorialTarget());
     }
 
@@ -819,13 +950,13 @@ export class GameScene implements Scene {
         drawProgressBar(ctx, c.x + 2, c.y + c.height + 5, c.width - 4, 7, ratio, barColor);
       }
 
-      // Order speech bubble with actual pixel-art dish sprite!
+      // Order speech bubble with pixel-art dish sprite + custom customer taste badges!
       if (!c.served && c.orderBubbleAlpha > 0) {
         ctx.globalAlpha = c.orderBubbleAlpha;
-        const bx = c.x + c.width - 2;
-        const by = c.y - 6;
-        const bw = 74;
-        const bh = 66;
+        const bx = c.x + c.width - 4;
+        const by = c.y - 10;
+        const bw = 78;
+        const bh = 82;
 
         // Bubble
         roundRect(ctx, bx, by, bw, bh, 10);
@@ -848,10 +979,10 @@ export class GameScene implements Scene {
         if (this.engine.assets.hasImage(foodKey)) {
           ctx.drawImage(
             this.engine.assets.getImage(foodKey),
-            bx + (bw - 44) / 2,
-            by + 3,
-            44,
-            44,
+            bx + (bw - 42) / 2,
+            by + 2,
+            42,
+            42,
           );
         }
 
@@ -861,7 +992,12 @@ export class GameScene implements Scene {
         ctx.font = 'bold 10px "Segoe UI", system-ui, sans-serif';
         ctx.fillStyle = '#2b1c17';
         const shortName = c.order.name.length > 11 ? `${c.order.name.slice(0, 10)}…` : c.order.name;
-        ctx.fillText(shortName, bx + bw / 2, by + bh - 10);
+        ctx.fillText(shortName, bx + bw / 2, by + 52);
+
+        // Customer custom taste preference badges (e.g. "+🌶️ +🥖 🚫🌿")
+        ctx.font = '10px "Segoe UI"';
+        ctx.fillStyle = '#b5561d';
+        ctx.fillText(c.taste.summaryBadges.join(' '), bx + bw / 2, by + 70);
 
         ctx.globalAlpha = 1;
       }

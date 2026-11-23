@@ -1,0 +1,841 @@
+// ============================================================
+// CraftMinigames — Creative Craft & Customer-Taste Minigames:
+// 5. VeggiePrepMinigame  (🥗 Nhặt rau tươi, loại lá úa)
+// 6. SeasoningMinigame   (🧂 Nêm gia vị & topping đúng khẩu vị khách!)
+// 7. WokTossMinigame     (🍳 Hất chảo xào lửa lớn)
+// 8. LayerPourMinigame   (☕ Giữ thả đúng vạch rót tầng Chè / Cà Phê)
+// ============================================================
+
+import type { Rect, Vec2 } from '../types';
+import { InputManager } from '../core/InputManager';
+import { roundRect, drawTextShadow } from '../utils/draw';
+import { clamp, randFloat, shuffle } from '../utils/math';
+import { generateCustomerTaste, type CustomerTasteOrder, type ToppingOption } from '../data/tastes';
+import {
+  BOARD_RECT,
+  gradeFromScore,
+  renderMinigameFrame,
+  renderResultStamp,
+  type CookingMinigame,
+  type MinigameContext,
+  type MinigameResult,
+} from './types';
+
+// ============================================================
+// 5. VeggiePrepMinigame — 🥗 Nhặt rau thơm tươi sạch (VEGGIE)
+// ============================================================
+
+interface VeggieItem {
+  x: number;
+  y: number;
+  r: number;
+  emoji: string;
+  fresh: boolean;
+  picked: boolean;
+  shake: number;
+  phase: number;
+}
+
+export class VeggiePrepMinigame implements CookingMinigame {
+  readonly title: string;
+  readonly instruction = 'Chạm nhặt hết 5 rau tươi xanh — tránh lá úa & sâu!';
+  readonly catSpeaker = 'golden' as const;
+
+  done = false;
+  result: MinigameResult | null = null;
+
+  private ctx: MinigameContext;
+  private elapsed = 0;
+  private finishTimer = 0;
+  private items: VeggieItem[] = [];
+  private mistakes = 0;
+  private catQuote = 'Nhặt nhanh mấy cọng rau xanh mướt bỏ vô tô nha, né lá úa ra!';
+
+  constructor(ctx: MinigameContext) {
+    this.ctx = ctx;
+    this.title = `🥗 ${ctx.step.action} — ${ctx.recipe.name}`;
+
+    // Place 5 fresh herbs + 2 wilted/bug items on non-overlapping basket slots
+    const slots = shuffle([
+      { x: 325, y: 215 }, { x: 425, y: 195 }, { x: 530, y: 205 }, { x: 630, y: 220 },
+      { x: 355, y: 310 }, { x: 475, y: 300 }, { x: 595, y: 315 },
+    ]);
+    const freshEmojis = ['🥬', '🌿', '🌱', '🥒', '🥕'];
+    const badEmojis = ['🍂', '🐛'];
+
+    for (let i = 0; i < 5; i++) {
+      this.items.push({
+        x: slots[i].x + randFloat(-10, 10),
+        y: slots[i].y + randFloat(-8, 8),
+        r: 34,
+        emoji: freshEmojis[i % freshEmojis.length],
+        fresh: true,
+        picked: false,
+        shake: 0,
+        phase: i * 1.1,
+      });
+    }
+    for (let i = 0; i < 2; i++) {
+      this.items.push({
+        x: slots[5 + i].x + randFloat(-8, 8),
+        y: slots[5 + i].y + randFloat(-6, 6),
+        r: 30,
+        emoji: badEmojis[i],
+        fresh: false,
+        picked: false,
+        shake: 0,
+        phase: i * 2.1,
+      });
+    }
+  }
+
+  onDown(pos: Vec2): void {
+    if (this.result) return;
+    for (const item of this.items) {
+      if (item.picked) continue;
+      if (Math.hypot(pos.x - item.x, pos.y - item.y) <= item.r + 8) {
+        if (item.fresh) {
+          item.picked = true;
+          const remaining = this.items.filter((it) => it.fresh && !it.picked).length;
+          this.catQuote =
+            remaining > 0
+              ? `Tươi roi rói! Còn ${remaining} lá rau nữa thôi! 🌿`
+              : 'Rau sạch bong kin kít luôn! Tuyệt vời! ⭐';
+
+          if (remaining === 0) {
+            const score = clamp(100 - this.mistakes * 20, 45, 100);
+            const grade = gradeFromScore(score);
+            this.result = {
+              score,
+              grade,
+              catSpeaker: 'golden',
+              catComment:
+                grade === 'PERFECT'
+                  ? 'Rau thơm tươi xanh không một vết úa! Khách mê tít! 🥬'
+                  : 'Nhặt xong rau rồi! Lần sau nhớ né sâu với lá úa nha~',
+            };
+          }
+        } else {
+          this.mistakes++;
+          item.shake = 0.4;
+          this.catQuote = 'Á!! Đó là lá úa / bé sâu mà! Đừng bỏ vô tô khách nha! 🙀';
+        }
+        return;
+      }
+    }
+  }
+
+  update(dt: number): void {
+    this.elapsed += dt;
+    for (const item of this.items) {
+      if (item.shake > 0) item.shake = Math.max(0, item.shake - dt);
+    }
+    if (this.result) {
+      this.finishTimer += dt;
+      if (this.finishTimer >= 0.7) this.done = true;
+    }
+  }
+
+  render(ctx: CanvasRenderingContext2D): void {
+    const b = BOARD_RECT;
+    renderMinigameFrame(ctx, this.ctx.engine, {
+      title: this.title,
+      instruction: this.instruction,
+      catSpeaker: this.catSpeaker,
+      catQuote: this.result ? this.result.catComment : this.catQuote,
+      elapsed: this.elapsed,
+      result: this.result,
+    });
+
+    const cx = b.x + b.width / 2;
+
+    // Large woven bamboo basket
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(cx, 268, 240, 128, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#7f4f24';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx, 264, 226, 116, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#b07d4f';
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(cx, 262, 206, 102, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#2d4739';
+    ctx.fill();
+
+    // Draw veggie tokens
+    for (const item of this.items) {
+      if (item.picked) continue;
+      const bob = Math.sin(this.elapsed * 4 + item.phase) * 3;
+      const shakeX = item.shake > 0 ? Math.sin(item.shake * 55) * 7 : 0;
+
+      ctx.beginPath();
+      ctx.arc(item.x + shakeX, item.y + bob, item.r, 0, Math.PI * 2);
+      ctx.fillStyle = item.fresh ? 'rgba(76, 175, 80, 0.28)' : 'rgba(230, 57, 70, 0.22)';
+      ctx.fill();
+      ctx.strokeStyle = item.fresh ? '#80ed99' : '#e63946';
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '34px "Segoe UI"';
+      ctx.fillText(item.emoji, item.x + shakeX, item.y + bob);
+    }
+
+    // Counter top of basket
+    const picked = this.items.filter((it) => it.fresh && it.picked).length;
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, `Rau tươi đã nhặt: ${picked} / 5`, cx, 138, '#80ed99');
+    ctx.restore();
+
+    if (this.result) {
+      renderResultStamp(ctx, this.result, this.finishTimer);
+    }
+  }
+}
+
+// ============================================================
+// 6. SeasoningMinigame — 🧂 Nêm gia vị & topping theo đúng khẩu vị khách!
+// (Hành lá / KHÔNG HÀNH, tương ớt, quẩy, nước mắm, pate, đồ chua...)
+// ============================================================
+
+export class SeasoningMinigame implements CookingMinigame {
+  readonly title: string;
+  readonly instruction = 'Chọn đúng gia vị khách yêu cầu rồi bấm XONG!';
+  readonly catSpeaker = 'golden' as const;
+
+  done = false;
+  result: MinigameResult | null = null;
+
+  private ctx: MinigameContext;
+  private taste: CustomerTasteOrder;
+  private elapsed = 0;
+  private finishTimer = 0;
+
+  private selected = new Set<string>();
+  private jarRects: Array<{ option: ToppingOption; rect: Rect }> = [];
+  private confirmBtn: Rect = { x: 642, y: 222, width: 152, height: 64 };
+  private catQuote: string;
+
+  constructor(ctx: MinigameContext) {
+    this.ctx = ctx;
+    this.taste = ctx.taste ?? generateCustomerTaste(ctx.recipe);
+    this.title = `🧂 Nêm Gia Vị & Topping — ${ctx.recipe.name}`;
+
+    const wantsText = this.taste.wanted.map((w) => w.label).join(' + ');
+    this.catQuote = this.taste.forbidden
+      ? `Khách dặn thêm ${wantsText}, và TUYỆT ĐỐI KHÔNG ${this.taste.forbidden.label.toUpperCase()} nha!`
+      : `Khách thích đậm đà: thêm ${wantsText} nhé!`;
+
+    // Lay out 6 touch-friendly seasoning jars cleanly along the bottom shelf
+    const jarW = 98;
+    const jarH = 82;
+    const gap = 10;
+    const totalW = this.taste.tray.length * jarW + (this.taste.tray.length - 1) * gap;
+    const startX = BOARD_RECT.x + (BOARD_RECT.width - totalW) / 2;
+
+    this.jarRects = this.taste.tray.map((option, i) => ({
+      option,
+      rect: {
+        x: startX + i * (jarW + gap),
+        y: 336,
+        width: jarW,
+        height: jarH,
+      },
+    }));
+  }
+
+  onDown(pos: Vec2): void {
+    if (this.result) return;
+
+    // Toggle seasoning jars
+    for (const { option, rect } of this.jarRects) {
+      if (InputManager.hitTest(pos, rect, 4)) {
+        if (this.selected.has(option.id)) {
+          this.selected.delete(option.id);
+          this.catQuote = `Đã gắp ${option.label} ra khỏi món!`;
+        } else {
+          this.selected.add(option.id);
+          if (this.taste.forbidden && option.id === this.taste.forbidden.id) {
+            this.catQuote = `Á!! Khách dặn KHÔNG ${option.label.toUpperCase()} mà! Chạm lại hũ đó để gắp ra mau! 🙀`;
+          } else if (this.taste.wanted.some((w) => w.id === option.id)) {
+            this.catQuote = `Chuẩn bài! Đúng vị ${option.label} khách mê luôn! ✨`;
+          } else {
+            this.catQuote = `Đã thêm chút ${option.label} — xem kỹ phiếu yêu cầu nha!`;
+          }
+        }
+        return;
+      }
+    }
+
+    // Confirm button
+    if (InputManager.hitTest(pos, this.confirmBtn, 6)) {
+      this.submitSeasoning();
+    }
+  }
+
+  private submitSeasoning(): void {
+    let score = 100;
+    let missing = 0;
+    let addedForbidden = false;
+    let extras = 0;
+
+    for (const w of this.taste.wanted) {
+      if (!this.selected.has(w.id)) {
+        score -= 28;
+        missing++;
+      }
+    }
+    if (this.taste.forbidden && this.selected.has(this.taste.forbidden.id)) {
+      score -= 45;
+      addedForbidden = true;
+    }
+    for (const id of this.selected) {
+      const isWanted = this.taste.wanted.some((w) => w.id === id);
+      const isForb = this.taste.forbidden?.id === id;
+      if (!isWanted && !isForb) {
+        score -= 10;
+        extras++;
+      }
+    }
+
+    score = clamp(score, 25, 100);
+    const grade = gradeFromScore(score);
+
+    let comment: string;
+    if (addedForbidden && this.taste.forbidden) {
+      comment = `Ôi không! Lỡ bỏ ${this.taste.forbidden.label} khách ghét rồi, Vằn Bếp Trưởng lườm kìa! 😿`;
+    } else if (missing === 0 && extras === 0) {
+      comment = 'Đúng từng miligam khẩu vị khách hàng! Tiền tip bay phấp phới luôn! ⭐';
+    } else if (missing > 0) {
+      comment = 'Hơi thiếu gia vị khách gọi một chút, lần sau nhìn kỹ phiếu nha!';
+    } else {
+      comment = 'Nêm hơi hào phóng thêm chút gia vị phụ nhưng vẫn ngon lắm! 😋';
+    }
+
+    this.result = {
+      score,
+      grade,
+      catSpeaker: addedForbidden ? 'boss' : 'golden',
+      catComment: comment,
+    };
+  }
+
+  update(dt: number): void {
+    this.elapsed += dt;
+    if (this.result) {
+      this.finishTimer += dt;
+      if (this.finishTimer >= 0.75) this.done = true;
+    }
+  }
+
+  render(ctx: CanvasRenderingContext2D): void {
+    const b = BOARD_RECT;
+    renderMinigameFrame(ctx, this.ctx.engine, {
+      title: this.title,
+      instruction: this.instruction,
+      catSpeaker: this.catSpeaker,
+      catQuote: this.result ? this.result.catComment : this.catQuote,
+      elapsed: this.elapsed,
+      result: this.result,
+    });
+
+    // Customer Custom Taste Ticket (top of board)
+    const ticketX = b.x + 24;
+    const ticketY = 130;
+    const ticketW = b.width - 48;
+    const ticketH = 54;
+
+    roundRect(ctx, ticketX, ticketY, ticketW, ticketH, 12);
+    ctx.fillStyle = '#fffcf5';
+    ctx.fill();
+    ctx.strokeStyle = '#d4a373';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#3d281c';
+    ctx.fillText('📋 PHIẾU KHẨU VỊ:', ticketX + 14, ticketY + ticketH / 2);
+
+    // Draw wanted & forbidden badges inside ticket
+    let bx = ticketX + 158;
+    for (const w of this.taste.wanted) {
+      const done = this.selected.has(w.id);
+      const text = `${done ? '✅' : '+'} ${w.emoji} ${w.label}`;
+      ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+      const tw = ctx.measureText(text).width + 18;
+      roundRect(ctx, bx, ticketY + 11, tw, 32, 8);
+      ctx.fillStyle = done ? '#2d9348' : '#e85d04';
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(text, bx + tw / 2, ticketY + ticketH / 2);
+      bx += tw + 10;
+    }
+
+    if (this.taste.forbidden) {
+      const f = this.taste.forbidden;
+      const violated = this.selected.has(f.id);
+      const text = `🚫 KHÔNG ${f.emoji} ${f.shortLabel}`;
+      ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+      const tw = ctx.measureText(text).width + 18;
+      roundRect(ctx, bx, ticketY + 11, tw, 32, 8);
+      ctx.fillStyle = violated ? '#d00000' : '#475569';
+      ctx.fill();
+      ctx.strokeStyle = '#ef4444';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#fff';
+      ctx.fillText(text, bx + tw / 2, ticketY + ticketH / 2);
+    }
+
+    // Center Dish Preview + floating added topping emojis!
+    const dishCx = b.x + 260;
+    const dishCy = 258;
+    ctx.beginPath();
+    ctx.ellipse(dishCx, dishCy + 34, 72, 16, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fill();
+
+    const foodKey = `food_${this.ctx.recipe.id}`;
+    if (this.ctx.engine.assets.hasImage(foodKey)) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.ctx.engine.assets.getImage(foodKey), dishCx - 54, dishCy - 56, 108, 108);
+    }
+
+    // Display currently added toppings orbiting neatly on top of the dish
+    let idx = 0;
+    for (const id of this.selected) {
+      const opt = this.taste.tray.find((t) => t.id === id);
+      if (!opt) continue;
+      const ox = dishCx - 44 + (idx % 3) * 44;
+      const oy = dishCy - 18 + Math.floor(idx / 3) * 28;
+      ctx.font = '26px "Segoe UI"';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(opt.emoji, ox, oy);
+      idx++;
+    }
+
+    // Confirm button to the right of the dish
+    const cb = this.confirmBtn;
+    const allWantedSelected = this.taste.wanted.every((w) => this.selected.has(w.id));
+    roundRect(ctx, cb.x, cb.y, cb.width, cb.height, 14);
+    ctx.fillStyle = allWantedSelected ? '#4CAF50' : '#2a9d8f';
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 18px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '✅ XONG MÓN!', cb.x + cb.width / 2, cb.y + cb.height / 2, '#fff');
+
+    // Bottom tray: 6 clickable Vietnamese seasoning jars
+    for (const { option, rect } of this.jarRects) {
+      const isPicked = this.selected.has(option.id);
+      const isForb = this.taste.forbidden?.id === option.id;
+
+      roundRect(ctx, rect.x, rect.y, rect.width, rect.height, 12);
+      ctx.fillStyle = isPicked
+        ? (isForb ? 'rgba(230, 57, 70, 0.85)' : 'rgba(76, 175, 80, 0.85)')
+        : 'rgba(255, 255, 255, 0.09)';
+      ctx.fill();
+      ctx.strokeStyle = isPicked ? '#fff' : option.color;
+      ctx.lineWidth = isPicked ? 3 : 2;
+      ctx.stroke();
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '28px "Segoe UI"';
+      ctx.fillText(option.emoji, rect.x + rect.width / 2, rect.y + 30);
+
+      ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, option.label, rect.x + rect.width / 2, rect.y + 64, '#fff');
+    }
+
+    if (this.result) {
+      renderResultStamp(ctx, this.result, this.finishTimer);
+    }
+  }
+}
+
+// ============================================================
+// 7. WokTossMinigame — 🍳 Hất chảo xào lửa lớn (WOK)
+// ============================================================
+
+export class WokTossMinigame implements CookingMinigame {
+  readonly title: string;
+  readonly instruction = 'Bấm HẤT CHẢO đúng lúc vòng lửa vàng sáng (3 lần)!';
+  readonly catSpeaker = 'boss' as const;
+
+  done = false;
+  result: MinigameResult | null = null;
+
+  private ctx: MinigameContext;
+  private elapsed = 0;
+  private finishTimer = 0;
+
+  private tossCount = 0;
+  private scores: number[] = [];
+  private pulsePhase = 0;     // 0..1 ring shrinking onto center
+  private tossAnim = 0;       // ingredients flying up in arc
+  private catQuote = 'Chờ vòng lửa co sát chảo rồi bấm HẤT CHẢO tung nguyên liệu lên!';
+
+  private tossBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
+
+  constructor(ctx: MinigameContext) {
+    this.ctx = ctx;
+    this.title = `🍳 ${ctx.step.action} — ${ctx.recipe.name}`;
+  }
+
+  onDown(pos: Vec2): void {
+    if (this.result || this.tossAnim > 0) return;
+    if (InputManager.hitTest(pos, BOARD_RECT)) {
+      this.doToss();
+    }
+  }
+
+  private doToss(): void {
+    // Best moment is when pulsePhase is near 0.72..0.96
+    const dist = Math.abs(this.pulsePhase - 0.84);
+    const s = dist <= 0.14 ? 100 : dist <= 0.28 ? 76 : 52;
+    this.scores.push(s);
+    this.tossCount++;
+    this.tossAnim = 0.45;
+    this.pulsePhase = 0;
+
+    this.catQuote =
+      s >= 85
+        ? 'Lửa bùng dậy mùi thơm chảo gang! Đỉnh của chóp! 🔥'
+        : 'Hất mạnh tay thêm chút nữa theo nhịp vòng lửa nha!';
+
+    if (this.tossCount >= 3) {
+      const avg = Math.round(this.scores.reduce((a, b) => a + b, 0) / this.scores.length);
+      const grade = gradeFromScore(avg);
+      this.result = {
+        score: avg,
+        grade,
+        catSpeaker: 'boss',
+        catComment:
+          grade === 'PERFECT'
+            ? 'Xào chảo lửa lớn dậy mùi thơm nức! Đệ tử ruột của Vằn! ⭐'
+            : 'Món xào nóng hổi xong rồi!',
+      };
+    }
+  }
+
+  update(dt: number): void {
+    this.elapsed += dt;
+    if (this.tossAnim > 0) this.tossAnim = Math.max(0, this.tossAnim - dt);
+
+    if (this.result) {
+      this.finishTimer += dt;
+      if (this.finishTimer >= 0.7) this.done = true;
+      return;
+    }
+
+    this.pulsePhase = (this.pulsePhase + dt * 0.72) % 1;
+  }
+
+  render(ctx: CanvasRenderingContext2D): void {
+    const b = BOARD_RECT;
+    renderMinigameFrame(ctx, this.ctx.engine, {
+      title: this.title,
+      instruction: this.instruction,
+      catSpeaker: this.catSpeaker,
+      catQuote: this.result ? this.result.catComment : this.catQuote,
+      elapsed: this.elapsed,
+      result: this.result,
+    });
+
+    const cx = b.x + b.width / 2;
+    const cy = 262;
+
+    // Target golden ring + shrinking timing ring
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, 56, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
+    ctx.lineWidth = 6;
+    ctx.stroke();
+
+    const shrinkR = 128 - this.pulsePhase * 86;
+    const inSweet = Math.abs(this.pulsePhase - 0.84) <= 0.14;
+    ctx.beginPath();
+    ctx.arc(cx, cy, shrinkR, 0, Math.PI * 2);
+    ctx.strokeStyle = inSweet ? '#ffd166' : 'rgba(244, 140, 6, 0.8)';
+    ctx.lineWidth = inSweet ? 5 : 3;
+    ctx.stroke();
+
+    // Wok sprite + tossed ingredients flying!
+    const wokKick = this.tossAnim > 0 ? Math.sin((this.tossAnim / 0.45) * Math.PI) * -22 : 0;
+    if (this.ctx.engine.assets.hasImage('station_wok')) {
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(this.ctx.engine.assets.getImage('station_wok'), cx - 64, cy - 60 + wokKick, 128, 128);
+    }
+
+    if (this.tossAnim > 0) {
+      const arc = Math.sin((this.tossAnim / 0.45) * Math.PI) * 95;
+      ctx.font = '26px "Segoe UI"';
+      ctx.textAlign = 'center';
+      ctx.fillText('🍜', cx - 28, cy - 30 - arc);
+      ctx.fillText('🥩', cx + 24, cy - 36 - arc * 0.9);
+      ctx.fillText('🌿', cx, cy - 48 - arc * 1.1);
+    }
+
+    // Counter
+    ctx.textAlign = 'center';
+    ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, `Lần hất chảo: ${this.tossCount} / 3`, cx, 140, '#ffd166');
+
+    // Toss button
+    const btn = this.tossBtn;
+    roundRect(ctx, btn.x, btn.y, btn.width, btn.height, 14);
+    ctx.fillStyle = inSweet ? '#4CAF50' : '#e85d04';
+    ctx.fill();
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.font = 'bold 20px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🍳 HẤT CHẢO NGAY!', btn.x + btn.width / 2, btn.y + btn.height / 2, '#fff');
+    ctx.restore();
+
+    if (this.result) {
+      renderResultStamp(ctx, this.result, this.finishTimer);
+    }
+  }
+}
+
+// ============================================================
+// 8. LayerPourMinigame — ☕ Giữ & thả đúng vạch rót tầng Chè / Cà Phê
+// ============================================================
+
+interface PourLayer {
+  name: string;
+  color: string;
+  targetTop: number; // 0..1 height of glass
+}
+
+export class LayerPourMinigame implements CookingMinigame {
+  readonly title: string;
+  readonly instruction = 'Nhấn GIỮ nút để rót — THẢ TAY đúng vạch vàng!';
+  readonly catSpeaker = 'golden' as const;
+
+  done = false;
+  result: MinigameResult | null = null;
+
+  private ctx: MinigameContext;
+  private elapsed = 0;
+  private finishTimer = 0;
+
+  private layers: PourLayer[];
+  private layerIdx = 0;
+  private level = 0; // current fill 0..1
+  private pouring = false;
+  private layerScores: number[] = [];
+  private filledLayers: Array<{ from: number; to: number; color: string }> = [];
+  private catQuote: string;
+
+  private pourBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
+
+  constructor(ctx: MinigameContext) {
+    this.ctx = ctx;
+    this.title = `☕ ${ctx.step.action} — ${ctx.recipe.name}`;
+
+    if (ctx.recipe.id.includes('che_')) {
+      this.layers = [
+        { name: 'Đậu đỏ & Đậu xanh', color: '#b8323a', targetTop: 0.45 },
+        { name: 'Thạch lá dứa & Cốt dừa', color: '#2d9348', targetTop: 0.86 },
+      ];
+    } else if (ctx.recipe.id.includes('tra_da')) {
+      this.layers = [
+        { name: 'Trà thơm vàng óng', color: '#d49a1a', targetTop: 0.55 },
+        { name: 'Đá lạnh mát rượi', color: '#90e0ef', targetTop: 0.88 },
+      ];
+    } else {
+      this.layers = [
+        { name: 'Sữa đặc Ông Thọ', color: '#f7ebd2', targetTop: 0.36 },
+        { name: 'Cà phê phin đậm đà', color: '#4a2410', targetTop: 0.86 },
+      ];
+    }
+
+    this.catQuote = `Giữ nút RÓT để đổ lớp "${this.layers[0].name}" tới đúng vạch vàng rồi thả tay nha!`;
+  }
+
+  onDown(pos: Vec2): void {
+    if (this.result) return;
+    if (InputManager.hitTest(pos, BOARD_RECT)) {
+      this.pouring = true;
+    }
+  }
+
+  onUp(): void {
+    if (!this.pouring || this.result) return;
+    this.pouring = false;
+    this.finishCurrentLayer();
+  }
+
+  private finishCurrentLayer(): void {
+    const layer = this.layers[this.layerIdx];
+    const prevTop = this.filledLayers.length > 0 ? this.filledLayers[this.filledLayers.length - 1].to : 0;
+    const diff = Math.abs(this.level - layer.targetTop);
+
+    const score =
+      diff <= 0.065 ? 100
+      : diff <= 0.14 ? 78
+      : 50;
+
+    this.filledLayers.push({ from: prevTop, to: this.level, color: layer.color });
+    this.layerScores.push(score);
+    this.layerIdx++;
+
+    if (this.layerIdx >= this.layers.length) {
+      const avg = Math.round(this.layerScores.reduce((a, b) => a + b, 0) / this.layerScores.length);
+      const grade = gradeFromScore(avg);
+      this.result = {
+        score: avg,
+        grade,
+        catSpeaker: 'golden',
+        catComment:
+          grade === 'PERFECT'
+            ? 'Phân tầng đẹp như hình chụp quảng cáo luôn!! Em thèm quá~ ☕✨'
+            : 'Rót xong rồi, mát lạnh giải khát hết sẩy!',
+      };
+    } else {
+      const next = this.layers[this.layerIdx];
+      this.catQuote =
+        score >= 85
+          ? `Chuẩn từng giọt! Giờ giữ để rót tiếp "${next.name}" tới vạch trên nha!`
+          : `Hơi lệch vạch xíu! Cố canh chuẩn lớp "${next.name}" nhé!`;
+    }
+  }
+
+  update(dt: number): void {
+    this.elapsed += dt;
+    if (this.result) {
+      this.finishTimer += dt;
+      if (this.finishTimer >= 0.7) this.done = true;
+      return;
+    }
+
+    if (this.pouring) {
+      this.level = Math.min(1, this.level + 0.48 * dt);
+      if (this.level >= 1) {
+        this.pouring = false;
+        this.finishCurrentLayer();
+      }
+    }
+  }
+
+  render(ctx: CanvasRenderingContext2D): void {
+    const b = BOARD_RECT;
+    renderMinigameFrame(ctx, this.ctx.engine, {
+      title: this.title,
+      instruction: this.instruction,
+      catSpeaker: this.catSpeaker,
+      catQuote: this.result ? this.result.catComment : this.catQuote,
+      elapsed: this.elapsed,
+      result: this.result,
+    });
+
+    const cx = b.x + b.width / 2;
+    const glassW = 112;
+    const glassH = 190;
+    const glassX = cx - glassW / 2;
+    const glassY = 154;
+
+    ctx.save();
+
+    // Pouring stream from top when holding
+    const activeLayer = this.layers[this.layerIdx];
+    if (this.pouring && activeLayer) {
+      ctx.fillStyle = activeLayer.color;
+      ctx.fillRect(cx - 5, 128, 10, glassY + glassH * (1 - this.level) - 128);
+    }
+
+    // Glass backdrop
+    roundRect(ctx, glassX, glassY, glassW, glassH, 12);
+    ctx.fillStyle = 'rgba(216, 243, 252, 0.16)';
+    ctx.fill();
+
+    // Clip liquids inside glass
+    ctx.save();
+    roundRect(ctx, glassX + 4, glassY + 4, glassW - 8, glassH - 8, 8);
+    ctx.clip();
+
+    // Already completed layers
+    for (const fl of this.filledLayers) {
+      const yBottom = glassY + glassH * (1 - fl.from);
+      const yTop = glassY + glassH * (1 - fl.to);
+      ctx.fillStyle = fl.color;
+      ctx.fillRect(glassX, yTop, glassW, yBottom - yTop + 1);
+    }
+
+    // Currently pouring active layer
+    if (activeLayer) {
+      const prevTop = this.filledLayers.length > 0 ? this.filledLayers[this.filledLayers.length - 1].to : 0;
+      if (this.level > prevTop) {
+        const yBottom = glassY + glassH * (1 - prevTop);
+        const yTop = glassY + glassH * (1 - this.level);
+        ctx.fillStyle = activeLayer.color;
+        ctx.fillRect(glassX, yTop, glassW, yBottom - yTop + 1);
+      }
+    }
+    ctx.restore();
+
+    // Glass glossy outline
+    roundRect(ctx, glassX, glassY, glassW, glassH, 12);
+    ctx.strokeStyle = '#d8f3fc';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+
+    // Target golden fill line for active layer!
+    if (activeLayer) {
+      const targetY = glassY + glassH * (1 - activeLayer.targetTop);
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 5]);
+      ctx.beginPath();
+      ctx.moveTo(glassX - 24, targetY);
+      ctx.lineTo(glassX + glassW + 24, targetY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, `← Vạch chuẩn (${activeLayer.name})`, glassX + glassW + 30, targetY, '#ffd166');
+    }
+
+    // Hold-to-pour button
+    const btn = this.pourBtn;
+    roundRect(ctx, btn.x, btn.y, btn.width, btn.height, 14);
+    ctx.fillStyle = this.pouring ? '#4CAF50' : '#2a9d8f';
+    ctx.fill();
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 20px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(
+      ctx,
+      this.pouring ? '🫗 ĐANG RÓT... (THẢ ĐÚNG VẠCH!)' : '🫗 GIỮ ĐỂ RÓT!',
+      btn.x + btn.width / 2,
+      btn.y + btn.height / 2,
+      '#fff',
+    );
+    ctx.restore();
+
+    if (this.result) {
+      renderResultStamp(ctx, this.result, this.finishTimer);
+    }
+  }
+}
