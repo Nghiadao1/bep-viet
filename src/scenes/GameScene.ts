@@ -15,6 +15,7 @@ import { MapScene } from './MapScene';
 import { supportsFullscreen, toggleFullscreen } from '../utils/mobile';
 import { TutorialSystem, type TutorialTarget } from '../systems/TutorialSystem';
 import { CatCompanionSystem } from '../systems/CatCompanionSystem';
+import { ParticleSystem } from '../systems/ParticleSystem';
 import {
   generateCustomerTaste,
   formatTasteSpeech,
@@ -121,14 +122,17 @@ export class GameScene implements Scene {
   private recipeCards: { recipe: Recipe; rect: Rect }[] = [];
   private pauseBtn: Rect = { x: 896, y: 6, width: 52, height: 40 };
   private fullscreenBtn: Rect = { x: 836, y: 6, width: 50, height: 40 };
+  private finishEarlyBtn: Rect = { x: 584, y: 8, width: 122, height: 36 };
   private cancelDishBtn: Rect = { x: 850, y: 357, width: 84, height: 34 };
   private resumeBtn: Rect = { x: 318, y: 290, width: 156, height: 52 };
   private exitMapBtn: Rect = { x: 486, y: 290, width: 156, height: 52 };
 
-  // 2-Cat NPC Tutorial & Live Interactive Cat Companion
+  // 2-Cat NPC Tutorial, Live Cat Companion & Visual Particle FX
   private tutorial: TutorialSystem;
   private cats: CatCompanionSystem;
+  private particles = new ParticleSystem();
   private forceTutorial: boolean;
+  private reachedThreeStars = false;
 
   // Interactive Cooking Minigame
   private activeMinigame: CookingMinigame | null = null;
@@ -190,6 +194,8 @@ export class GameScene implements Scene {
     this.activeDish = null;
     this.activeMinigame = null;
     this.activeStationIndex = -1;
+    this.reachedThreeStars = false;
+    this.particles.clear();
     this.customers = [];
     this.nextCustomerId = 0;
     this.spawnTimer = 500; // first spawn shortly after starting
@@ -314,6 +320,16 @@ export class GameScene implements Scene {
         return;
       }
 
+      // Early finish button once 3 stars are achieved (no waiting around!)
+      if (
+        this.reachedThreeStars &&
+        !this.activeMinigame &&
+        InputManager.hitTest(pos, this.finishEarlyBtn, 6)
+      ) {
+        this.endGame();
+        return;
+      }
+
       // Active cooking minigame consumes clicks while open
       if (this.activeMinigame) {
         this.activeMinigame.onClick?.(pos);
@@ -417,6 +433,8 @@ export class GameScene implements Scene {
     // Check if this is the correct station
     if (station.type !== currentStep.stationType) {
       this.showFeedback(`❌ Sai trạm! Cần: ${STATION_LABELS[currentStep.stationType]}`, '#E63946');
+      this.particles.emitAngryPuff(station.x + station.width / 2, station.y + 24);
+      this.particles.shake(4, 0.16);
       this.cats.say('boss', `Nhầm trạm rồi! Đang cần ${STATION_LABELS[currentStep.stationType]} cơ mà! 😾`, 3.0);
       return;
     }
@@ -435,6 +453,7 @@ export class GameScene implements Scene {
         recipe: dish.recipe,
         step: currentStep,
         taste: matchingCustomer?.taste ?? null,
+        particles: this.particles,
       },
       isLastStep,
     );
@@ -523,10 +542,26 @@ export class GameScene implements Scene {
       this.combo++;
       if (this.combo > this.maxCombo) this.maxCombo = this.combo;
 
-      const perfectTag = avgScore >= 85 ? ' ⭐ PERFECT!' : '';
-      this.showFeedback(`💰 +${formatMoney(earned)}${perfectTag} Combo x${this.combo}`, '#4CAF50');
+      // Juicy serving FX: starburst, arcing gold coins to money HUD, floating payout text!
+      const custCx = target.x + target.width / 2;
+      const custCy = target.y + 30;
+      this.particles.emitStarburst(custCx, custCy, avgScore >= 85 ? '#ffd166' : '#4CAF50', 22);
+      this.particles.emitCoinShower(custCx, custCy, 66, 26, avgScore >= 85 ? 9 : 6);
+      this.particles.emitFloatingText(
+        custCx,
+        custCy - 18,
+        `+${formatMoney(earned)}${avgScore >= 85 ? ' ⭐' : ''}`,
+        avgScore >= 85 ? '#ffd166' : '#4CAF50',
+        22,
+      );
 
-      if (this.combo >= 3) {
+      // Celebrate hitting 3-star milestone!
+      if (!this.reachedThreeStars && this.money >= this.levelConfig.targetScore) {
+        this.reachedThreeStars = true;
+        this.particles.emitStarburst(480, 140, '#ffd166', 32);
+        this.particles.emitFloatingText(480, 150, '⭐⭐⭐ ĐẠT 3 SAO! Có thể bấm "Qua màn"!', '#ffd166', 22);
+        this.cats.say('both', 'ĐẠT 3 SAO RỒI!! Bấm nút "Qua màn" góc trên hoặc bán thêm kiếm tiền nha! 🎉⭐', 5.0);
+      } else if (this.combo >= 3) {
         this.cats.say('both', `COMBO x${this.combo}!! Quán đông nghẹt khách khen nức nở! 🔥⭐`, 4.2);
       } else if (avgScore >= 85) {
         this.cats.say('boss', `Quá xuất sắc! Khách thưởng đậm +${formatMoney(earned)}! 👑`, 4.0);
@@ -534,10 +569,15 @@ export class GameScene implements Scene {
         this.cats.say('golden', `Đã bưng ${dish.recipe.name} ra cho khách! +${formatMoney(earned)}! 🍜`, 3.8);
       }
 
+      const perfectTag = avgScore >= 85 ? ' ⭐ PERFECT!' : '';
+      this.showFeedback(`💰 +${formatMoney(earned)}${perfectTag} Combo x${this.combo}`, '#4CAF50');
+
       this.tutorial.onFirstCustomerServed();
     } else {
       // No matching customer — wasted dish
       this.showFeedback(`😢 Không có khách đặt ${dish.recipe.name}!`, '#E63946');
+      this.particles.emitAngryPuff(480, 260);
+      this.particles.shake(5, 0.2);
       this.cats.say('boss', `Nấu nhầm món rồi! Chưa có khách gọi ${dish.recipe.name}! 😿`, 3.6);
       this.combo = 0;
     }
@@ -608,9 +648,28 @@ export class GameScene implements Scene {
   update(dt: number): void {
     if (this.gameOver || this.paused) return;
 
-    // Always animate Cat NPC tutorial & Live Cat Companion
+    // Always animate Cat NPC tutorial, Live Cat Companion & Particles!
     this.tutorial.update(dt);
     this.cats.update(dt);
+    this.particles.update(dt);
+
+    // Ambient kitchen atmosphere: hot station steam & warm golden lantern fireflies!
+    if (!this.activeMinigame) {
+      if (Math.random() < dt * 4.5) {
+        this.particles.emitLanternDust(randFloat(40, 920), randFloat(68, 165));
+      }
+      for (const st of this.stations) {
+        if (
+          (st.type === StationType.BROTH ||
+            st.type === StationType.NOODLE ||
+            st.type === StationType.GRILL ||
+            st.type === StationType.WOK) &&
+          Math.random() < dt * 2.2
+        ) {
+          this.particles.emitSteam(st.x + st.width / 2, st.y + 18, 1);
+        }
+      }
+    }
 
     // Pause gameplay timers & spawning while visual-novel intro/celebration modal is open
     if (this.tutorial.isModalBlocking) return;
@@ -623,8 +682,8 @@ export class GameScene implements Scene {
       }
     }
 
-    // Slow down level & patience timers to 25% while focused inside a cooking minigame
-    const worldDt = this.activeMinigame ? dt * 0.25 : dt;
+    // Gentle 45% speed during minigames so 60-85s rounds feel brisk and fair
+    const worldDt = this.activeMinigame ? dt * 0.45 : dt;
 
     // Level timer (frozen during initial guided prompts so player can read safely)
     if (!this.tutorial.shouldFreezeTimers) {
@@ -695,6 +754,8 @@ export class GameScene implements Scene {
         c.mood = CustomerMood.ANGRY;
         this.combo = 0;
         this.showFeedback('😡 Khách bỏ đi!', '#E63946');
+        this.particles.emitAngryPuff(c.x + c.width / 2, c.y + 24);
+        this.particles.shake(5, 0.2);
         this.cats.say('boss', 'Khách đợi lâu quá bỏ đi mất rồi! Lần sau tăng tốc lên nhé! 😾', 3.5);
       }
     }
@@ -751,6 +812,10 @@ export class GameScene implements Scene {
   render(ctx: CanvasRenderingContext2D): void {
     const W = 960;
     const H = 540;
+    const shake = this.particles.getShakeOffset();
+
+    ctx.save();
+    ctx.translate(shake.x, shake.y);
 
     // --- Pixel art Sài Gòn stall background ---
     ctx.imageSmoothingEnabled = false;
@@ -805,10 +870,15 @@ export class GameScene implements Scene {
       this.activeMinigame.render(ctx);
     }
 
+    // --- 60fps Particle FX Layer (renders crisp above kitchen & minigame board!) ---
+    this.particles.render(ctx);
+
     // --- 2-Cat NPC Tutorial Overlay (hidden briefly while playing a minigame) ---
     if (this.tutorial.isActive && !this.activeMinigame) {
       this.tutorial.render(ctx, W, H, this.getTutorialTarget());
     }
+
+    ctx.restore(); // end camera shake transform
 
     // --- Pause overlay ---
     if (this.paused) {
@@ -842,15 +912,53 @@ export class GameScene implements Scene {
 
     ctx.textBaseline = 'middle';
 
-    // Money
+    // Money + Live Star Goal Progress Bar
     ctx.textAlign = 'left';
-    ctx.font = 'bold 20px monospace';
-    drawTextShadow(ctx, `💰 ${formatMoney(this.money)}`, 16, 26, '#4CAF50');
+    ctx.font = 'bold 18px monospace';
+    drawTextShadow(
+      ctx,
+      `💰 ${formatMoney(this.money)}/${formatMoney(this.levelConfig.targetScore)}`,
+      14,
+      19,
+      '#4CAF50',
+    );
 
-    // Day name
+    const progress = Math.min(1, this.money / Math.max(1, this.levelConfig.targetScore));
+    const currentStars =
+      this.money >= this.levelConfig.targetScore ? 3
+      : this.money >= this.levelConfig.minScore ? 2
+      : this.money > 0 ? 1
+      : 0;
+    drawProgressBar(ctx, 16, 33, 158, 9, progress, currentStars >= 3 ? '#ffd166' : '#4CAF50');
+
+    ctx.font = '13px "Segoe UI"';
+    ctx.fillStyle = '#ffd166';
+    ctx.fillText('⭐'.repeat(currentStars) + '☆'.repeat(3 - currentStars), 182, 26);
+
+    // Day name (shifted gently left of center if early finish button is visible)
     ctx.textAlign = 'center';
-    ctx.font = 'bold 18px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, this.levelConfig.dayName, W / 2, 26, '#FCA311');
+    ctx.font = 'bold 17px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(
+      ctx,
+      this.levelConfig.dayName,
+      this.reachedThreeStars ? 420 : W / 2 - 10,
+      26,
+      '#FCA311',
+    );
+
+    // Glowing "⏭ Qua màn" button once 3 stars are reached!
+    if (this.reachedThreeStars && !this.activeMinigame) {
+      const fb = this.finishEarlyBtn;
+      roundRect(ctx, fb.x, fb.y, fb.width, fb.height, 9);
+      ctx.fillStyle = '#2d9348';
+      ctx.fill();
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.font = 'bold 13.5px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, '⏭ Qua màn!', fb.x + fb.width / 2, fb.y + fb.height / 2, '#fff');
+    }
 
     // Timer
     const timeColor = this.timeRemaining < 10 ? '#E63946' : this.timeRemaining < 30 ? '#FCA311' : '#fff';

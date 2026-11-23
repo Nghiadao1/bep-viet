@@ -96,6 +96,7 @@ export class VeggiePrepMinigame implements CookingMinigame {
       if (Math.hypot(pos.x - item.x, pos.y - item.y) <= item.r + 8) {
         if (item.fresh) {
           item.picked = true;
+          this.ctx.particles.emitLeafBurst(item.x, item.y);
           const remaining = this.items.filter((it) => it.fresh && !it.picked).length;
           this.catQuote =
             remaining > 0
@@ -105,6 +106,7 @@ export class VeggiePrepMinigame implements CookingMinigame {
           if (remaining === 0) {
             const score = clamp(100 - this.mistakes * 20, 45, 100);
             const grade = gradeFromScore(score);
+            this.ctx.particles.emitStarburst(BOARD_RECT.x + BOARD_RECT.width / 2, 260, '#52b788', 22);
             this.result = {
               score,
               grade,
@@ -118,6 +120,8 @@ export class VeggiePrepMinigame implements CookingMinigame {
         } else {
           this.mistakes++;
           item.shake = 0.4;
+          this.ctx.particles.emitAngryPuff(item.x, item.y);
+          this.ctx.particles.shake(4, 0.16);
           this.catQuote = 'Á!! Đó là lá úa / bé sâu mà! Đừng bỏ vô tô khách nha! 🙀';
         }
         return;
@@ -132,7 +136,7 @@ export class VeggiePrepMinigame implements CookingMinigame {
     }
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.7) this.done = true;
+      if (this.finishTimer >= 0.48) this.done = true;
     }
   }
 
@@ -259,9 +263,16 @@ export class SeasoningMinigame implements CookingMinigame {
           this.catQuote = `Đã gắp ${option.label} ra khỏi món!`;
         } else {
           this.selected.add(option.id);
+          const dishCx = BOARD_RECT.x + 260;
+          const dishCy = 258;
+          this.ctx.particles.emitSpiceRain(dishCx, dishCy, option.color);
+
           if (this.taste.forbidden && option.id === this.taste.forbidden.id) {
+            this.ctx.particles.emitAngryPuff(dishCx, dishCy);
+            this.ctx.particles.shake(5, 0.18);
             this.catQuote = `Á!! Khách dặn KHÔNG ${option.label.toUpperCase()} mà! Chạm lại hũ đó để gắp ra mau! 🙀`;
           } else if (this.taste.wanted.some((w) => w.id === option.id)) {
+            this.ctx.particles.emitStarburst(dishCx, dishCy - 10, '#ffd166', 10);
             this.catQuote = `Chuẩn bài! Đúng vị ${option.label} khách mê luôn! ✨`;
           } else {
             this.catQuote = `Đã thêm chút ${option.label} — xem kỹ phiếu yêu cầu nha!`;
@@ -316,6 +327,12 @@ export class SeasoningMinigame implements CookingMinigame {
       comment = 'Nêm hơi hào phóng thêm chút gia vị phụ nhưng vẫn ngon lắm! 😋';
     }
 
+    this.ctx.particles.emitStarburst(
+      BOARD_RECT.x + 260,
+      250,
+      addedForbidden ? '#e63946' : '#4CAF50',
+      22,
+    );
     this.result = {
       score,
       grade,
@@ -328,7 +345,7 @@ export class SeasoningMinigame implements CookingMinigame {
     this.elapsed += dt;
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.75) this.done = true;
+      if (this.finishTimer >= 0.52) this.done = true;
     }
   }
 
@@ -503,13 +520,19 @@ export class WokTossMinigame implements CookingMinigame {
   }
 
   private doToss(): void {
-    // Best moment is when pulsePhase is near 0.72..0.96
+    const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
     const dist = Math.abs(this.pulsePhase - 0.84);
-    const s = dist <= 0.14 ? 100 : dist <= 0.28 ? 76 : 52;
+    const s = dist <= 0.16 ? 100 : dist <= 0.3 ? 76 : 52;
     this.scores.push(s);
     this.tossCount++;
-    this.tossAnim = 0.45;
+    this.tossAnim = 0.42;
     this.pulsePhase = 0;
+
+    this.ctx.particles.emitFireSparks(cx, 286, 18);
+    this.ctx.particles.shake(4, 0.14);
+    if (s >= 85) {
+      this.ctx.particles.emitStarburst(cx, 230, '#ffd166', 14);
+    }
 
     this.catQuote =
       s >= 85
@@ -519,6 +542,7 @@ export class WokTossMinigame implements CookingMinigame {
     if (this.tossCount >= 3) {
       const avg = Math.round(this.scores.reduce((a, b) => a + b, 0) / this.scores.length);
       const grade = gradeFromScore(avg);
+      this.ctx.particles.emitStarburst(cx, 240, '#4CAF50', 24);
       this.result = {
         score: avg,
         grade,
@@ -537,7 +561,7 @@ export class WokTossMinigame implements CookingMinigame {
 
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.7) this.done = true;
+      if (this.finishTimer >= 0.48) this.done = true;
       return;
     }
 
@@ -696,9 +720,16 @@ export class LayerPourMinigame implements CookingMinigame {
     this.layerScores.push(score);
     this.layerIdx++;
 
+    const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
+    const liquidY = 154 + 190 * (1 - this.level);
+    if (score >= 85) {
+      this.ctx.particles.emitStarburst(cx, liquidY, '#ffd166', 14);
+    }
+
     if (this.layerIdx >= this.layers.length) {
       const avg = Math.round(this.layerScores.reduce((a, b) => a + b, 0) / this.layerScores.length);
       const grade = gradeFromScore(avg);
+      this.ctx.particles.emitStarburst(cx, 230, '#4CAF50', 22);
       this.result = {
         score: avg,
         grade,
@@ -721,12 +752,18 @@ export class LayerPourMinigame implements CookingMinigame {
     this.elapsed += dt;
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.7) this.done = true;
+      if (this.finishTimer >= 0.48) this.done = true;
       return;
     }
 
     if (this.pouring) {
-      this.level = Math.min(1, this.level + 0.48 * dt);
+      this.level = Math.min(1, this.level + 0.56 * dt);
+      const activeLayer = this.layers[this.layerIdx];
+      if (activeLayer && Math.random() < dt * 24) {
+        const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
+        const liquidY = 154 + 190 * (1 - this.level);
+        this.ctx.particles.emitLiquidSplash(cx, liquidY, activeLayer.color, 2);
+      }
       if (this.level >= 1) {
         this.pouring = false;
         this.finishCurrentLayer();

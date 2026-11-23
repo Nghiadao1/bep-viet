@@ -54,8 +54,11 @@ export class FirePumpMinigame implements CookingMinigame {
     if (this.result) return;
     if (InputManager.hitTest(pos, BOARD_RECT)) {
       this.holding = true;
-      this.temp = clamp(this.temp + 13, 0, 100);
+      this.temp = clamp(this.temp + 15, 0, 100);
       this.flameBurst = 0.25;
+      const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
+      this.ctx.particles.emitFireSparks(cx, 286, 10);
+      this.ctx.particles.emitSteam(cx, 174, 2);
     }
   }
 
@@ -69,24 +72,33 @@ export class FirePumpMinigame implements CookingMinigame {
 
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.7) this.done = true;
+      if (this.finishTimer >= 0.48) this.done = true;
       return;
     }
 
     // Holding gently pumps fire; releasing cools pot down
     if (this.holding) {
-      this.temp = clamp(this.temp + 36 * dt, 0, 100);
+      this.temp = clamp(this.temp + 42 * dt, 0, 100);
+      if (Math.random() < dt * 18) {
+        this.ctx.particles.emitFireSparks(BOARD_RECT.x + BOARD_RECT.width / 2, 286, 2);
+      }
     } else {
-      this.temp = clamp(this.temp - 25 * dt, 0, 100);
+      this.temp = clamp(this.temp - 24 * dt, 0, 100);
     }
 
-    // Sweet spot: 52..80
-    if (this.temp >= 52 && this.temp <= 80) {
-      this.boilProgress = Math.min(1, this.boilProgress + dt / 2.1);
+    // Sweet spot: 50..82 (snappy 1.55s boil!)
+    if (this.temp >= 50 && this.temp <= 82) {
+      this.boilProgress = Math.min(1, this.boilProgress + dt / 1.55);
+      if (Math.random() < dt * 10) {
+        this.ctx.particles.emitSteam(BOARD_RECT.x + BOARD_RECT.width / 2, 174, 1);
+      }
       this.catQuote = 'Sôi sùng sục rồi! Giữ đều ngọn lửa trong vùng xanh nhé! 🔥';
-    } else if (this.temp > 80) {
-      this.boilProgress = Math.min(1, this.boilProgress + dt / 3.8);
+    } else if (this.temp > 82) {
+      this.boilProgress = Math.min(1, this.boilProgress + dt / 2.8);
       this.overheatPenalty = Math.min(35, this.overheatPenalty + 22 * dt);
+      if (Math.random() < dt * 14) {
+        this.ctx.particles.emitSteam(BOARD_RECT.x + BOARD_RECT.width / 2, 165, 2);
+      }
       this.catQuote = 'Á trào nước dùng rồi!! Nhả tay ra bớt lửa mau! 🙀';
     } else {
       this.catQuote = 'Lửa nhỏ quá! Bấm THỔI LỬA nhanh hơn nữa lên nào! 💨';
@@ -95,6 +107,7 @@ export class FirePumpMinigame implements CookingMinigame {
     if (this.boilProgress >= 1) {
       const score = clamp(Math.round(100 - this.overheatPenalty), 50, 100);
       const grade = gradeFromScore(score);
+      this.ctx.particles.emitStarburst(BOARD_RECT.x + BOARD_RECT.width / 2, 230, grade === 'PERFECT' ? '#4CAF50' : '#FCA311', 22);
       this.result = {
         score,
         grade,
@@ -266,30 +279,35 @@ export class TimingCutMinigame implements CookingMinigame {
     let label: string;
     let color: string;
 
-    if (dist <= 0.085) {
+    const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
+    if (dist <= 0.095) {
       hitScore = 100;
       label = '⭐ HOÀN HẢO!';
       color = '#4CAF50';
+      this.ctx.particles.emitStarburst(cx, 205, '#ffd166', 14);
       this.catQuote = 'Nhát cắt chuẩn như máy luôn!! Tiếp nào anh/chị ơi! ✨';
-    } else if (dist <= 0.19) {
-      hitScore = 75;
+    } else if (dist <= 0.2) {
+      hitScore = 78;
       label = '👍 CHUẨN RỒI!';
       color = '#FCA311';
+      this.ctx.particles.emitSliceSparks(cx, 205, '#fff3b0', 10);
       this.catQuote = 'Ngon lành! Cố canh sát tâm vàng hơn chút nữa nhé!';
     } else {
-      hitScore = 40;
+      hitScore = 45;
       label = '😅 HƠI LỆCH!';
       color = '#E63946';
+      this.ctx.particles.shake(4, 0.14);
       this.catQuote = 'Ối sợi phở hơi to xíu! Bình tĩnh canh nhịp lại nha~';
     }
 
     this.hits.push(hitScore);
     this.popups.push({ text: label, color, y: 245, alpha: 1 });
-    this.speed += 0.18; // slightly faster each cut for rhythm fun
+    this.speed += 0.16;
 
     if (this.hits.length >= 3) {
       const avg = Math.round(this.hits.reduce((a, b) => a + b, 0) / this.hits.length);
       const grade = gradeFromScore(avg);
+      this.ctx.particles.emitStarburst(cx, 220, '#4CAF50', 22);
       this.result = {
         score: avg,
         grade,
@@ -313,7 +331,7 @@ export class TimingCutMinigame implements CookingMinigame {
 
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.7) this.done = true;
+      if (this.finishTimer >= 0.48) this.done = true;
       return;
     }
 
@@ -541,6 +559,11 @@ export class SliceLineMinigame implements CookingMinigame {
     this.trail.push(pos);
     if (this.trail.length > 40) this.trail.shift();
 
+    // Spray gleaming blade & crumb/meat particles along swipe trail!
+    if (Math.random() < 0.45) {
+      this.ctx.particles.emitSliceSparks(pos.x, pos.y, this.isBread ? '#f4be6b' : '#f28482', 2);
+    }
+
     const dev = this.pointToSegmentDist(pos, guide);
     if (dev > this.maxDeviation) this.maxDeviation = dev;
 
@@ -595,7 +618,11 @@ export class SliceLineMinigame implements CookingMinigame {
     this.trail = [];
     this.activeLineIdx++;
 
+    const midX = (guide.x1 + guide.x2) / 2;
+    const midY = (guide.y1 + guide.y2) / 2;
+    this.ctx.particles.emitSliceSparks(midX, midY, this.isBread ? '#ffd166' : '#ff758f', 14);
     if (accuracyScore >= 85) {
+      this.ctx.particles.emitStarburst(midX, midY, '#ffd166', 10);
       this.catQuote = this.isBread
         ? 'Xẻ ngọt lịm giòn rụm luôn! Đúng chuẩn bánh mì Sài Gòn! ⭐'
         : 'Nhát dao điêu luyện! Miếng thịt mỏng đều đẹp mắt! ⭐';
@@ -606,6 +633,7 @@ export class SliceLineMinigame implements CookingMinigame {
     if (this.activeLineIdx >= this.lines.length) {
       const avg = Math.round(this.lines.reduce((s, l) => s + l.score, 0) / this.lines.length);
       const grade = gradeFromScore(avg);
+      this.ctx.particles.emitStarburst(BOARD_RECT.x + BOARD_RECT.width / 2, 260, '#4CAF50', 22);
       this.result = {
         score: avg,
         grade,
@@ -632,7 +660,7 @@ export class SliceLineMinigame implements CookingMinigame {
     this.elapsed += dt;
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.7) this.done = true;
+      if (this.finishTimer >= 0.48) this.done = true;
     }
   }
 
@@ -819,16 +847,22 @@ export class GrillFlipMinigame implements CookingMinigame {
   }
 
   private flipOrFinish(): void {
+    const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
     let sScore: number;
-    if (this.cook >= 0.62 && this.cook <= 0.86) {
+    if (this.cook >= 0.6 && this.cook <= 0.88) {
       sScore = 100;
+      this.ctx.particles.emitStarburst(cx, 224, '#ffd166', 16);
+      this.ctx.particles.emitFireSparks(cx, 232, 14);
       this.catQuote = 'Vàng ươm thơm nức cả khu phố!! Đúng chuẩn bếp than hoa! ⭐';
-    } else if (this.cook >= 0.45 && this.cook <= 0.94) {
-      sScore = 72;
-      this.catQuote = this.cook < 0.62 ? 'Hơi non chút xíu nhưng vẫn ngon!' : 'Suýt cháy cạnh rồi đó nha! 😅';
+    } else if (this.cook >= 0.44 && this.cook <= 0.94) {
+      sScore = 74;
+      this.ctx.particles.emitFireSparks(cx, 232, 10);
+      this.catQuote = this.cook < 0.6 ? 'Hơi non chút xíu nhưng vẫn ngon!' : 'Suýt cháy cạnh rồi đó nha! 😅';
     } else {
       sScore = 40;
-      this.catQuote = this.cook < 0.45 ? 'Còn sống nhăn à! Chờ chín thêm chút nữa!' : 'Á cháy đen thui rồi!! 🙀';
+      this.ctx.particles.emitAngryPuff(cx, 224);
+      this.ctx.particles.shake(5, 0.2);
+      this.catQuote = this.cook < 0.44 ? 'Còn sống nhăn à! Chờ chín thêm chút nữa!' : 'Á cháy đen thui rồi!! 🙀';
     }
 
     this.sideScores.push(sScore);
@@ -836,17 +870,18 @@ export class GrillFlipMinigame implements CookingMinigame {
     if (this.side === 1) {
       this.side = 2;
       this.cook = 0;
-      this.flipAnim = 0.35;
+      this.flipAnim = 0.3;
     } else {
       const avg = Math.round((this.sideScores[0] + this.sideScores[1]) / 2);
       const grade = gradeFromScore(avg);
+      this.ctx.particles.emitStarburst(cx, 224, '#4CAF50', 22);
       this.result = {
         score: avg,
         grade,
         catSpeaker: 'boss',
         catComment:
           grade === 'PERFECT'
-            ? 'Sườn nướng vàng ruộm 2 mặt, Mèo Vàng nhìn chảy nước miếng kìa! 🔥'
+            ? 'Nướng vàng ruộm 2 mặt, Mèo Vàng nhìn chảy nước miếng kìa! 🔥'
             : 'Nướng xong 2 mặt rồi, bày ra đĩa thôi nào!',
       };
     }
@@ -861,11 +896,20 @@ export class GrillFlipMinigame implements CookingMinigame {
 
     if (this.result) {
       this.finishTimer += dt;
-      if (this.finishTimer >= 0.7) this.done = true;
+      if (this.finishTimer >= 0.48) this.done = true;
       return;
     }
 
-    this.cook += 0.44 * dt;
+    // Continuous sizzling sparks & smoke from charcoal
+    const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
+    if (Math.random() < dt * 8) {
+      this.ctx.particles.emitSteam(cx, 212, 1);
+    }
+    if (Math.random() < dt * 6) {
+      this.ctx.particles.emitFireSparks(cx, 240, 1);
+    }
+
+    this.cook += 0.56 * dt;
     if (this.cook >= 1) {
       this.cook = 1;
       this.flipOrFinish(); // auto-burn if never flipped

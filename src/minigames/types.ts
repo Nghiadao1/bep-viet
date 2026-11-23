@@ -5,6 +5,7 @@
 import type { Engine } from '../core/Engine';
 import type { CookingStep, Recipe, Rect, Vec2 } from '../types';
 import type { CustomerTasteOrder } from '../data/tastes';
+import type { ParticleSystem } from '../systems/ParticleSystem';
 import { roundRect, drawTextShadow } from '../utils/draw';
 
 export type MinigameGrade = 'PERFECT' | 'GOOD' | 'OK';
@@ -21,6 +22,7 @@ export interface MinigameContext {
   recipe: Recipe;
   step: CookingStep;
   taste: CustomerTasteOrder | null;
+  particles: ParticleSystem;
 }
 
 export interface CookingMinigame {
