@@ -1,21 +1,28 @@
 // ============================================================
-// ResultScene — End-of-day results with star animation
+// ResultScene — Dopamine Reward Screen with Both Cat NPCs,
+// Reward Chest, New Dish Unlock Showcase & Shop Upgrade Link
 // ============================================================
 
 import type { Engine } from '../core/Engine';
-import type { Scene, Rect } from '../types';
+import type { Scene, Rect, Recipe } from '../types';
 import { InputManager } from '../core/InputManager';
 import { roundRect, drawTextShadow } from '../utils/draw';
 import { formatMoney, randFloat } from '../utils/math';
-import { TweenManager, Tween } from '../utils/animation';
+import { TweenManager } from '../utils/animation';
+import { getRecipe } from '../data/recipes';
+import { getNewlyUnlockedRecipes, getLevel } from '../data/levels';
 import { GameScene } from './GameScene';
 import { MapScene } from './MapScene';
+import { ShopScene, SHOP_ITEMS, getShopItemCost } from './ShopScene';
+import { StoryScene } from './StoryScene';
 
 export interface ResultData {
   levelId: number;
   dayName: string;
   customersServed: number;
+  targetCustomers: number;
   moneyEarned: number;
+  rewardBonus: number;
   stars: number;
   maxCombo: number;
   targetScore: number;
@@ -44,25 +51,20 @@ export class ResultScene implements Scene {
   private data: ResultData;
   private tweens = new TweenManager();
 
-  // Animated values
   private moneyDisplay = { value: 0 };
-  private servedDisplay = { value: 0 };
-  private comboDisplay = { value: 0 };
+  private bonusDisplay = { value: 0 };
 
-  // Stars
   private starAnims: StarAnim[] = [];
   private starRevealTimer = 0;
   private starsRevealed = 0;
 
-  // Confetti
   private confetti: ConfettiParticle[] = [];
   private showConfetti = false;
+  private unlockedNextRecipes: Recipe[] = [];
+  private canAffordUpgrade = false;
 
-  // Buttons
-  private buttons: { label: string; rect: Rect; color: string; action: string }[] = [];
+  private buttons: { label: string; rect: Rect; color: string; action: string; badge?: string }[] = [];
   private removeClick?: () => void;
-
-  // Timing
   private elapsed = 0;
 
   constructor(engine: Engine, data: ResultData) {
@@ -74,52 +76,78 @@ export class ResultScene implements Scene {
     this.engine.input.clear();
     this.elapsed = 0;
     this.starsRevealed = 0;
-    this.starRevealTimer = 0.8; // delay before first star
+    this.starRevealTimer = 0.45;
+    this.confetti = [];
+    this.showConfetti = this.data.stars >= 2;
+    if (this.showConfetti) this.spawnConfetti(36);
 
-    // Prepare star animations
+    // Check newly unlocked dishes for the next level!
+    this.unlockedNextRecipes = [];
+    if (this.data.stars > 0 && this.data.levelId < 50) {
+      const nextIds = getNewlyUnlockedRecipes(this.data.levelId + 1);
+      for (const rid of nextIds) {
+        const r = getRecipe(rid);
+        if (r) {
+          this.unlockedNextRecipes.push(r);
+          this.engine.save.unlockRecipe(r.id);
+        }
+      }
+    }
+
+    // Check if player can afford any Shop upgrade right now!
+    const money = this.engine.save.current.money;
+    this.canAffordUpgrade = SHOP_ITEMS.some((item) => {
+      const lv = this.engine.save.getUpgradeLevel(item.id);
+      return lv < item.maxLevel && money >= getShopItemCost(item, lv);
+    });
+
     this.starAnims = [];
     for (let i = 0; i < 3; i++) {
       this.starAnims.push({ scale: 0, alpha: 0, revealed: false });
     }
 
-    // Animate numbers
-    this.tweens.to(this.moneyDisplay, { value: this.data.moneyEarned }, 1200, 'easeOutQuad');
-    this.tweens.to(this.servedDisplay, { value: this.data.customersServed }, 800, 'easeOutQuad');
-    this.tweens.to(this.comboDisplay, { value: this.data.maxCombo }, 600, 'easeOutQuad');
+    this.tweens.to(this.moneyDisplay, { value: this.data.moneyEarned }, 900, 'easeOutQuad');
+    this.tweens.to(this.bonusDisplay, { value: this.data.rewardBonus }, 1100, 'easeOutQuad');
 
-    // Setup touch-friendly buttons
-    const cx = 480;
-    const btnW = 200;
-    const btnH = 52;
-    const btnGap = 18;
-    const totalW = 3 * btnW + 2 * btnGap;
-    const startX = cx - totalW / 2;
-    const btnY = 434;
+    // 4 crisp touch-friendly buttons
+    const btnW = 192;
+    const btnH = 50;
+    const gap = 14;
+    const totalW = 4 * btnW + 3 * gap;
+    const startX = (960 - totalW) / 2;
+    const btnY = 456;
 
     this.buttons = [
       {
         label: '🔄 Chơi lại',
         rect: { x: startX, y: btnY, width: btnW, height: btnH },
-        color: '#E85D04',
+        color: '#6C757D',
         action: 'retry',
       },
       {
-        label: '▶ Level tiếp',
-        rect: { x: startX + btnW + btnGap, y: btnY, width: btnW, height: btnH },
-        color: '#4CAF50',
+        label: '🏪 Nâng cấp',
+        rect: { x: startX + (btnW + gap), y: btnY, width: btnW, height: btnH },
+        color: '#D97706',
+        action: 'shop',
+        badge: this.canAffordUpgrade ? 'MỚI!' : undefined,
+      },
+      {
+        label: this.data.levelId < 50 ? '▶ Màn tiếp!' : '👑 Hoàn thành!',
+        rect: { x: startX + 2 * (btnW + gap), y: btnY, width: btnW, height: btnH },
+        color: this.data.stars > 0 ? '#2d9348' : '#475569',
         action: 'next',
       },
       {
-        label: '🗺 Bản đồ',
-        rect: { x: startX + 2 * (btnW + btnGap), y: btnY, width: btnW, height: btnH },
-        color: '#457B9D',
+        label: '🗺 Bản đồ VN',
+        rect: { x: startX + 3 * (btnW + gap), y: btnY, width: btnW, height: btnH },
+        color: '#2A9D8F',
         action: 'map',
       },
     ];
 
     this.removeClick = this.engine.input.onClick((pos) => {
       for (const btn of this.buttons) {
-        if (InputManager.hitTest(pos, btn.rect)) {
+        if (InputManager.hitTest(pos, btn.rect, 6)) {
           this.handleAction(btn.action);
           return;
         }
@@ -135,18 +163,36 @@ export class ResultScene implements Scene {
 
   private handleAction(action: string): void {
     switch (action) {
-      case 'retry': {
+      case 'retry':
         this.engine.scenes.replace(new GameScene(this.engine, this.data.levelId));
         break;
-      }
+      case 'shop':
+        this.engine.scenes.replace(new ShopScene(this.engine, 'map'));
+        break;
       case 'next': {
-        this.engine.scenes.replace(new GameScene(this.engine, this.data.levelId + 1));
+        if (this.data.stars <= 0) {
+          this.engine.scenes.replace(new GameScene(this.engine, this.data.levelId));
+          return;
+        }
+        const nextId = Math.min(50, this.data.levelId + 1);
+        const nextLevel = getLevel(nextId);
+        const seen = this.engine.save.current.seenChapters ?? [];
+        // Auto-play Chapter Opening Cutscene when entering a brand-new Vietnamese region!
+        if (nextLevel && !seen.includes(nextLevel.chapter)) {
+          this.engine.save.update({ seenChapters: [...seen, nextLevel.chapter] });
+          this.engine.scenes.replace(
+            new StoryScene(this.engine, nextLevel.chapter, () => {
+              this.engine.scenes.replace(new GameScene(this.engine, nextId));
+            }),
+          );
+        } else {
+          this.engine.scenes.replace(new GameScene(this.engine, nextId));
+        }
         break;
       }
-      case 'map': {
+      case 'map':
         this.engine.scenes.replace(new MapScene(this.engine));
         break;
-      }
     }
   }
 
@@ -154,23 +200,14 @@ export class ResultScene implements Scene {
     this.elapsed += dt;
     this.tweens.update(dt);
 
-    // Star reveal sequence
+    // Staggered star pop-in
     this.starRevealTimer -= dt;
     if (this.starRevealTimer <= 0 && this.starsRevealed < this.data.stars) {
       const idx = this.starsRevealed;
       this.starAnims[idx].revealed = true;
-
-      // Bounce-in tween
-      this.tweens.to(this.starAnims[idx] as any, { scale: 1, alpha: 1 }, 500, 'easeOutBack');
-
+      this.tweens.to(this.starAnims[idx] as unknown as Record<string, number>, { scale: 1, alpha: 1 }, 420, 'easeOutBack');
       this.starsRevealed++;
-      this.starRevealTimer = 0.4;
-
-      // If last star and 3 stars → start confetti
-      if (this.starsRevealed === 3 && this.data.stars === 3) {
-        this.showConfetti = true;
-        this.spawnConfetti();
-      }
+      this.starRevealTimer = 0.28;
     }
 
     // Update confetti
@@ -179,29 +216,26 @@ export class ResultScene implements Scene {
         const p = this.confetti[i];
         p.x += p.vx * dt;
         p.y += p.vy * dt;
-        p.vy += 150 * dt; // gravity
+        p.vy += 170 * dt;
         p.rotation += p.rotSpeed * dt;
-        p.alpha -= 0.3 * dt;
-        if (p.alpha <= 0 || p.y > 600) {
-          this.confetti.splice(i, 1);
-        }
+        p.alpha -= 0.28 * dt;
+        if (p.alpha <= 0 || p.y > 580) this.confetti.splice(i, 1);
       }
-      // Keep spawning for a bit
-      if (this.confetti.length < 60 && this.elapsed < 6) {
-        this.spawnConfetti(5);
+      if (this.confetti.length < 45 && this.elapsed < 5) {
+        this.spawnConfetti(4);
       }
     }
   }
 
-  private spawnConfetti(count = 30): void {
+  private spawnConfetti(count = 24): void {
     const colors = ['#E63946', '#F4A261', '#2A9D8F', '#E9C46A', '#457B9D', '#FCA311'];
     for (let i = 0; i < count; i++) {
       this.confetti.push({
-        x: randFloat(200, 760),
-        y: randFloat(-20, 100),
-        vx: randFloat(-120, 120),
-        vy: randFloat(-200, -50),
-        size: randFloat(4, 10),
+        x: randFloat(180, 780),
+        y: randFloat(-20, 80),
+        vx: randFloat(-110, 110),
+        vy: randFloat(-180, -40),
+        size: randFloat(5, 10),
         color: colors[Math.floor(Math.random() * colors.length)],
         rotation: randFloat(0, Math.PI * 2),
         rotSpeed: randFloat(-5, 5),
@@ -216,118 +250,159 @@ export class ResultScene implements Scene {
 
     // Background
     const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#1a1a2e');
-    grad.addColorStop(1, '#16213e');
+    grad.addColorStop(0, '#16152c');
+    grad.addColorStop(1, '#1e1c3a');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, W, H);
 
-    // --- Title ---
+    // Both Cat NPCs celebrating on Left & Right!
+    const bobA = Math.sin(this.elapsed * 3.5) * 6;
+    const bobB = Math.sin(this.elapsed * 3.5 + 1.4) * 6;
+    ctx.imageSmoothingEnabled = true;
+
+    if (this.engine.assets.hasImage('npc_cat_boss')) {
+      const img = this.engine.assets.getImage('npc_cat_boss');
+      const dh = 195;
+      const dw = (img.width / img.height) * dh;
+      ctx.drawImage(img, 24, 232 + bobA, dw, dh);
+    }
+    if (this.engine.assets.hasImage('npc_cat_golden')) {
+      const img = this.engine.assets.getImage('npc_cat_golden');
+      const dh = 175;
+      const dw = (img.width / img.height) * dh;
+      ctx.drawImage(img, W - dw - 24, 248 + bobB, dw, dh);
+    }
+
+    // Header
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 36px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, `${this.data.dayName} — Kết thúc!`, W / 2, 60, '#FCA311');
+    ctx.font = 'bold 32px "Segoe UI", system-ui, sans-serif';
+    const headline =
+      this.data.stars >= 3 ? `🎉 ${this.data.dayName} — XUẤT SẮC!`
+      : this.data.stars >= 1 ? `🍜 ${this.data.dayName} — QUA MÀN!`
+      : `😿 ${this.data.dayName} — THỬ LẠI NÀO!`;
+    drawTextShadow(ctx, headline, W / 2, 46, '#FCA311');
 
-    // --- Stars ---
-    const starCx = W / 2;
-    const starY = 130;
-    const starGap = 70;
-
+    // 3 Stars
+    const starY = 104;
     for (let i = 0; i < 3; i++) {
+      const x = W / 2 + (i - 1) * 68;
+      ctx.font = '46px "Segoe UI"';
+      ctx.fillStyle = '#334155';
+      ctx.fillText('☆', x, starY);
+
       const anim = this.starAnims[i];
-      const x = starCx + (i - 1) * starGap;
-
-      ctx.save();
-      ctx.translate(x, starY);
-      ctx.scale(anim.scale, anim.scale);
-      ctx.globalAlpha = anim.alpha;
-
-      ctx.font = '48px "Segoe UI"';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-
       if (anim.revealed) {
+        ctx.save();
+        ctx.translate(x, starY);
+        ctx.scale(anim.scale, anim.scale);
+        ctx.globalAlpha = anim.alpha;
         ctx.fillText('⭐', 0, 0);
-      } else {
-        ctx.fillStyle = '#333';
-        ctx.fillText('☆', 0, 0);
-      }
-
-      ctx.restore();
-    }
-
-    // Show empty stars behind
-    for (let i = 0; i < 3; i++) {
-      if (!this.starAnims[i].revealed) {
-        const x = starCx + (i - 1) * starGap;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.font = '48px "Segoe UI"';
-        ctx.fillStyle = '#333';
-        ctx.fillText('☆', x, starY);
+        ctx.restore();
       }
     }
 
-    // --- Stats card ---
-    const cardX = W / 2 - 200;
-    const cardY = 190;
-    const cardW = 400;
-    const cardH = 200;
+    // Center Rewards Card
+    const cardW = 470;
+    const cardH = this.unlockedNextRecipes.length > 0 ? 226 : 196;
+    const cardX = (W - cardW) / 2;
+    const cardY = 148;
 
     roundRect(ctx, cardX, cardY, cardW, cardH, 16);
-    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    ctx.fillStyle = 'rgba(15, 18, 36, 0.88)';
     ctx.fill();
-    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(252, 163, 17, 0.45)';
+    ctx.lineWidth = 2;
     ctx.stroke();
 
-    const lines = [
-      { label: '👥 Khách phục vụ:', value: `${Math.floor(this.servedDisplay.value)}` },
-      { label: '💰 Tiền kiếm được:', value: formatMoney(Math.floor(this.moneyDisplay.value)) },
-      { label: '🎯 Mục tiêu:', value: formatMoney(this.data.targetScore) },
-      { label: '🔥 Combo cao nhất:', value: `x${Math.floor(this.comboDisplay.value)}` },
+    const rows = [
+      { label: '👥 Khách đã phục vụ:', val: `${this.data.customersServed} / ${this.data.targetCustomers}`, col: '#fff' },
+      { label: '💰 Tiền bán hàng:', val: formatMoney(Math.floor(this.moneyDisplay.value)), col: '#80ed99' },
+      { label: '🎁 Rương thưởng qua màn:', val: `+${formatMoney(Math.floor(this.bonusDisplay.value))}`, col: '#ffd166' },
+      { label: '🔥 Combo cao nhất:', val: `x${this.data.maxCombo}`, col: '#f4a261' },
     ];
 
-    for (let i = 0; i < lines.length; i++) {
-      const ly = cardY + 40 + i * 42;
+    for (let i = 0; i < rows.length; i++) {
+      const ry = cardY + 30 + i * 32;
       ctx.textAlign = 'left';
-      ctx.font = '18px "Segoe UI", system-ui, sans-serif';
-      ctx.fillStyle = 'rgba(255,255,255,0.7)';
-      ctx.fillText(lines[i].label, cardX + 30, ly);
+      ctx.font = '16px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(255,255,255,0.78)';
+      ctx.fillText(rows[i].label, cardX + 24, ry);
 
       ctx.textAlign = 'right';
-      ctx.font = 'bold 20px monospace';
-      drawTextShadow(ctx, lines[i].value, cardX + cardW - 30, ly, '#FCA311');
+      ctx.font = 'bold 18px monospace';
+      drawTextShadow(ctx, rows[i].val, cardX + cardW - 24, ry, rows[i].col);
     }
 
-    // --- Buttons ---
-    for (const btn of this.buttons) {
-      const pointer = this.engine.input.pointer;
-      const hover = InputManager.hitTest(pointer, btn.rect);
-
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.3)';
-      ctx.shadowBlur = 6;
-      ctx.shadowOffsetY = 3;
-
-      roundRect(ctx, btn.rect.x, btn.rect.y, btn.rect.width, btn.rect.height, 10);
-      ctx.fillStyle = hover ? btn.color : this.darken(btn.color, 0.2);
+    // Newly Unlocked Dish Showcase Banner right inside the Reward Card!
+    if (this.unlockedNextRecipes.length > 0) {
+      const dish = this.unlockedNextRecipes[0];
+      const uY = cardY + 152;
+      roundRect(ctx, cardX + 16, uY, cardW - 32, 60, 12);
+      ctx.fillStyle = 'rgba(42, 157, 143, 0.25)';
       ctx.fill();
+      ctx.strokeStyle = '#4CAF50';
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
 
-      ctx.shadowBlur = 0;
-      ctx.restore();
+      const foodKey = `food_${dish.id}`;
+      if (this.engine.assets.hasImage(foodKey)) {
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(this.engine.assets.getImage(foodKey), cardX + 26, uY + 6, 48, 48);
+      }
 
-      roundRect(ctx, btn.rect.x, btn.rect.y, btn.rect.width, btn.rect.height, 10);
-      ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-      ctx.lineWidth = 1;
+      ctx.textAlign = 'left';
+      ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = '#80ed99';
+      ctx.fillText('🆕 MỞ KHÓA MÓN MỚI CHO MÀN TIẾP THEO!', cardX + 84, uY + 20);
+
+      ctx.font = 'bold 17px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, `${dish.name} (${dish.nameEn})`, cardX + 84, uY + 42, '#fff');
+    }
+
+    // Cat Duo Reaction Strip below card
+    const reactY = cardY + cardH + 26;
+    const catReaction =
+      this.data.stars >= 3
+        ? '👑 Vằn & 🐾 Mèo Vàng: "Tuyệt đỉnh 3 sao!! Vào tiệm nâng cấp hoặc qua màn mới chinh phục tiếp thôi!!"'
+        : this.data.stars >= 1
+          ? '🐾 Mèo Vàng: "Qua màn ngon lành rồi! Nâng cấp thêm đồ nghề là lần sau gom trọn 3 sao ngay!"'
+          : '👑 Vằn Bếp Trưởng: "Chưa đủ khách rồi! Bình tĩnh làm lại cùng ta nhé, nhất định thắng!"';
+
+    ctx.textAlign = 'center';
+    ctx.font = 'italic 14.5px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#fde68a';
+    ctx.fillText(catReaction, W / 2, reactY);
+
+    // 4 Action Buttons
+    for (const btn of this.buttons) {
+      const hover = InputManager.hitTest(this.engine.input.pointer, btn.rect);
+      roundRect(ctx, btn.rect.x, btn.rect.y, btn.rect.width, btn.rect.height, 12);
+      ctx.fillStyle = hover ? btn.color : this.darken(btn.color, 0.16);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255,255,255,0.22)';
+      ctx.lineWidth = 1.5;
       ctx.stroke();
 
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = 'bold 18px "Segoe UI", system-ui, sans-serif';
-      drawTextShadow(ctx, btn.label, btn.rect.x + btn.rect.width / 2, btn.rect.y + btn.rect.height / 2);
+      ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, btn.label, btn.rect.x + btn.rect.width / 2, btn.rect.y + btn.rect.height / 2, '#fff');
+
+      // Pulsing "MỚI!" badge on Shop button if player can afford an upgrade!
+      if (btn.badge) {
+        const bx = btn.rect.x + btn.rect.width - 42;
+        const by = btn.rect.y - 10;
+        roundRect(ctx, bx, by, 48, 22, 11);
+        ctx.fillStyle = '#e63946';
+        ctx.fill();
+        ctx.font = 'bold 11px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(btn.badge, bx + 24, by + 11);
+      }
     }
 
-    // --- Confetti ---
+    // Confetti
     for (const p of this.confetti) {
       ctx.save();
       ctx.translate(p.x, p.y);

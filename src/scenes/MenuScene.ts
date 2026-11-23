@@ -10,6 +10,7 @@ import { randFloat, randInt } from '../utils/math';
 import { MapScene } from './MapScene';
 import { RecipeBookScene } from './RecipeBookScene';
 import { GameScene } from './GameScene';
+import { ShopScene } from './ShopScene';
 import { isFullscreen, supportsFullscreen, toggleFullscreen } from '../utils/mobile';
 
 interface SteamParticle {
@@ -73,16 +74,16 @@ export class MenuScene implements Scene {
         hoverColor: '#F59E0B',
       },
       {
-        label: '📖 Công Thức',
+        label: '🏪 Tiệm Nâng Cấp',
         rect: { x: cx - btnW / 2, y: startY + (btnH + btnGap) * 2, width: btnW, height: btnH },
-        color: '#2A9D8F',
-        hoverColor: '#3AC4B4',
+        color: '#2d9348',
+        hoverColor: '#4CAF50',
       },
       {
-        label: this.soundEnabled ? '🔊 Âm thanh: BẬT' : '🔇 Âm thanh: TẮT',
+        label: '📖 Công Thức',
         rect: { x: cx - btnW / 2, y: startY + (btnH + btnGap) * 3, width: btnW, height: btnH },
-        color: '#6C757D',
-        hoverColor: '#868E96',
+        color: '#2A9D8F',
+        hoverColor: '#3AC4B4',
       },
     ];
 
@@ -105,16 +106,15 @@ export class MenuScene implements Scene {
         this.engine.scenes.replace(new GameScene(this.engine, 1, true));
         return;
       }
-      // Recipe book button → RecipeBookScene
+      // Shop button → ShopScene
       if (InputManager.hitTest(pos, this.buttons[2].rect, 4)) {
-        this.engine.scenes.replace(new RecipeBookScene(this.engine));
+        this.engine.scenes.replace(new ShopScene(this.engine, 'menu'));
         return;
       }
-      // Settings button → toggle sound
+      // Recipe book button → RecipeBookScene
       if (InputManager.hitTest(pos, this.buttons[3].rect, 4)) {
-        this.engine.audio.toggleMute();
-        this.soundEnabled = !this.engine.audio.muted;
-        this.buttons[3].label = this.soundEnabled ? '🔊 Âm thanh: BẬT' : '🔇 Âm thanh: TẮT';
+        this.engine.scenes.replace(new RecipeBookScene(this.engine));
+        return;
       }
     });
   }

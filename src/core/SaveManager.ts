@@ -18,6 +18,7 @@ function createDefaultSave(): SaveData {
     upgrades: {},
     unlockedRecipes: ['pho_bo'],
     tutorialCompleted: false,
+    seenChapters: [],
     settings: {
       musicVolume: 0.5,
       sfxVolume: 0.7,

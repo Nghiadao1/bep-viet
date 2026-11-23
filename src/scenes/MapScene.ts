@@ -12,6 +12,8 @@ import { CHAPTERS, getLevelsByChapter } from '../data/levels';
 import { MenuScene } from './MenuScene';
 import { GameScene } from './GameScene';
 import { StoryScene } from './StoryScene';
+import { ShopScene } from './ShopScene';
+import { formatMoney } from '../utils/math';
 
 // Accurate geographic coastline waypoints [lon, lat] of Mainland Vietnam (clockwise from Hà Giang)
 const VIETNAM_MAINLAND_GEO: ReadonlyArray<[number, number]> = [
@@ -152,9 +154,10 @@ export class MapScene implements Scene {
   // Click hit regions
   private pinHitRects: { chapterIdx: number; rect: Rect; pos: Vec2 }[] = [];
   private levelRects: Rect[] = [];
-  private backBtn: Rect = { x: 20, y: 12, width: 128, height: 42 };
+  private backBtn: Rect = { x: 20, y: 12, width: 120, height: 42 };
   private storyBtn: Rect = { x: 760, y: 98, width: 164, height: 34 };
-  private tutorialBtn: Rect = { x: 774, y: 12, width: 166, height: 42 };
+  private shopBtn: Rect = { x: 644, y: 12, width: 158, height: 42 };
+  private tutorialBtn: Rect = { x: 812, y: 12, width: 128, height: 42 };
 
   // Cached projected polygons
   private mainlandPts: Vec2[] = [];
@@ -195,6 +198,12 @@ export class MapScene implements Scene {
         return;
       }
 
+      // Open Upgrade Shop!
+      if (InputManager.hitTest(pos, this.shopBtn, 6)) {
+        this.engine.scenes.replace(new ShopScene(this.engine, 'map'));
+        return;
+      }
+
       // Replay tutorial in Level 1
       if (InputManager.hitTest(pos, this.tutorialBtn, 6)) {
         this.engine.scenes.replace(new GameScene(this.engine, 1, true));
@@ -228,7 +237,18 @@ export class MapScene implements Scene {
         if (InputManager.hitTest(pos, this.levelRects[i], 6)) {
           const level = levels[i];
           if (level && level.id <= save.currentLevel) {
-            this.engine.scenes.replace(new GameScene(this.engine, level.id));
+            const seen = save.seenChapters ?? [];
+            // Auto-play Chapter Opening Story Cutscene on first entry into any region!
+            if (i === 0 && !seen.includes(chapter.id)) {
+              this.engine.save.update({ seenChapters: [...seen, chapter.id] });
+              this.engine.scenes.replace(
+                new StoryScene(this.engine, chapter.id, () => {
+                  this.engine.scenes.replace(new GameScene(this.engine, level.id));
+                }),
+              );
+            } else {
+              this.engine.scenes.replace(new GameScene(this.engine, level.id));
+            }
           }
           return;
         }
@@ -287,8 +307,25 @@ export class MapScene implements Scene {
     );
 
     // Title
-    ctx.font = 'bold 26px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, '🗺 Hành Trình Ẩm Thực Việt Nam', W / 2 - 20, 33, '#FCA311');
+    ctx.font = 'bold 23px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🗺 Hành Trình Bếp Việt', 392, 33, '#FCA311');
+
+    // Upgrade Shop button with current money!
+    const shopHover = InputManager.hitTest(this.engine.input.pointer, this.shopBtn);
+    roundRect(ctx, this.shopBtn.x, this.shopBtn.y, this.shopBtn.width, this.shopBtn.height, 10);
+    ctx.fillStyle = shopHover ? 'rgba(76,175,80,0.4)' : 'rgba(76,175,80,0.22)';
+    ctx.fill();
+    ctx.strokeStyle = '#4CAF50';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.font = 'bold 13.5px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(
+      ctx,
+      `🏪 Nâng cấp (${formatMoney(this.engine.save.current.money)})`,
+      this.shopBtn.x + this.shopBtn.width / 2,
+      this.shopBtn.y + this.shopBtn.height / 2,
+      '#80ed99',
+    );
 
     // Replay Tutorial button (top-right)
     const tutHover = InputManager.hitTest(this.engine.input.pointer, this.tutorialBtn);
@@ -298,10 +335,10 @@ export class MapScene implements Scene {
     ctx.strokeStyle = 'rgba(252,163,17,0.55)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
-    ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+    ctx.font = 'bold 13.5px "Segoe UI", system-ui, sans-serif';
     drawTextShadow(
       ctx,
-      '🐾 Xem Hướng Dẫn',
+      '🐾 Hướng dẫn',
       this.tutorialBtn.x + this.tutorialBtn.width / 2,
       this.tutorialBtn.y + this.tutorialBtn.height / 2,
       '#FCA311',

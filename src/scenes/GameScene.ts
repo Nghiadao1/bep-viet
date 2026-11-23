@@ -10,8 +10,10 @@ import { roundRect, drawTextShadow, drawProgressBar } from '../utils/draw';
 import { formatMoney, formatTime, clamp, randFloat, randInt, randPick } from '../utils/math';
 import { RECIPES, getRecipe } from '../data/recipes';
 import { getLevel } from '../data/levels';
+import { CUSTOMERS } from '../data/customers';
 import { ResultScene } from './ResultScene';
 import { MapScene } from './MapScene';
+import { getUpgradeBonuses, type ActiveUpgradeBonuses } from './ShopScene';
 import { supportsFullscreen, toggleFullscreen } from '../utils/mobile';
 import { TutorialSystem, type TutorialTarget } from '../systems/TutorialSystem';
 import { CatCompanionSystem } from '../systems/CatCompanionSystem';
@@ -56,6 +58,8 @@ interface InlineCustomer {
   served: boolean;
   leaving: boolean;
   warnedImpatient: boolean;
+  speechText: string;
+  speechTimer: number;
   orderBubbleAlpha: number;
 }
 
@@ -63,6 +67,7 @@ interface ActiveDish {
   recipe: Recipe;
   currentStepIndex: number;
   steps: CookingStep[];
+  minigameSteps: Set<number>;
   stepScores: number[];
   completed: boolean;
 }
@@ -105,8 +110,15 @@ export class GameScene implements Scene {
   private gameOver = false;
   private money = 0;
   private customersServed = 0;
+  private targetCustomers = 3;
+  private dishesStartedCount = 0;
   private combo = 0;
   private maxCombo = 0;
+  private winDelayTimer = 0;
+  private briefingOpen = false;
+  private briefingElapsed = 0;
+  private bonuses!: ActiveUpgradeBonuses;
+  private startBriefingBtn: Rect = { x: 350, y: 446, width: 260, height: 54 };
 
   // Entities
   private stations: InlineStation[] = [];
@@ -185,10 +197,14 @@ export class GameScene implements Scene {
     }
 
     this.timeRemaining = this.levelConfig.timeLimit;
+    this.targetCustomers = this.levelConfig.targetCustomers ?? 3;
+    this.bonuses = getUpgradeBonuses(this.engine.save.current);
     this.money = 0;
     this.customersServed = 0;
+    this.dishesStartedCount = 0;
     this.combo = 0;
     this.maxCombo = 0;
+    this.winDelayTimer = 0;
     this.paused = false;
     this.gameOver = false;
     this.activeDish = null;
@@ -198,11 +214,20 @@ export class GameScene implements Scene {
     this.particles.clear();
     this.customers = [];
     this.nextCustomerId = 0;
-    this.spawnTimer = 500; // first spawn shortly after starting
-    this.cats.say('boss', 'Sẵn sàng nổi lửa chưa? Chờ khách vào gọi món nhé! 🔥', 4.0);
-    if (this.forceTutorial || (this.levelId === 1 && !this.engine.save.current.tutorialCompleted)) {
+    this.spawnTimer = 400; // immediate lively start!
+    this.briefingElapsed = 0;
+
+    const willRunTutorial =
+      this.forceTutorial || (this.levelId === 1 && !this.engine.save.current.tutorialCompleted);
+
+    if (willRunTutorial) {
+      this.briefingOpen = false;
       this.tutorial.start();
+    } else {
+      // Show punchy 2-Cat Story & Mission Briefing card before every stage!
+      this.briefingOpen = true;
     }
+    this.cats.say('boss', 'Sẵn sàng nổi lửa chưa? Chờ khách vào gọi món nhé! 🔥', 4.0);
 
     // Resolve available recipes
     this.recipes = [];
@@ -320,6 +345,19 @@ export class GameScene implements Scene {
         return;
       }
 
+      // Pre-level 2-Cat Story & Mission Briefing card
+      if (this.briefingOpen) {
+        if (
+          InputManager.hitTest(pos, this.startBriefingBtn, 16) ||
+          this.briefingElapsed > 0.35
+        ) {
+          this.briefingOpen = false;
+          this.particles.emitStarburst(480, 270, '#ffd166', 18);
+          this.cats.say('golden', 'Mở quán rồi!! Đón vị khách đầu tiên nào!! 🍜✨', 3.5);
+        }
+        return;
+      }
+
       // Early finish button once 3 stars are achieved (no waiting around!)
       if (
         this.reachedThreeStars &&
@@ -395,10 +433,36 @@ export class GameScene implements Scene {
   }
 
   private startDish(recipe: Recipe): void {
+    // Pick 2 smart rotating signature minigame steps per dish (so every bowl feels fresh & fast, ZERO repetition!)
+    const minigameSteps = new Set<number>();
+    const lastIdx = recipe.steps.length - 1;
+    minigameSteps.add(lastIdx); // ALWAYS include customer's custom seasoning/grill/pour finale!
+
+    const prepCount = Math.max(1, lastIdx);
+    const rotIdx = this.dishesStartedCount % prepCount;
+    minigameSteps.add(rotIdx);
+
+    // Bánh Mì always highlights Xẻ ổ bánh (0) + Thêm nhân (2) + Nướng giòn (3) for full signature feel!
+    if (recipe.id.includes('banh_mi') && recipe.steps.length >= 4) {
+      minigameSteps.add(0);
+      minigameSteps.add(2);
+    }
+    // VIP Boss stages highlight an extra prep step for thrilling mastery!
+    if (this.levelConfig.missionType === 'vip_critic' && prepCount > 1) {
+      minigameSteps.add((rotIdx + 1) % prepCount);
+    }
+    // Shop upgrade: Phụ Bếp Thần Tốc lets Mèo Vàng handle extra prep steps on 1-tap!
+    if (this.bonuses.autoSkipStepBonus >= 2 && minigameSteps.size > 2) {
+      minigameSteps.delete(rotIdx);
+    }
+
+    this.dishesStartedCount++;
+
     this.activeDish = {
       recipe,
       currentStepIndex: 0,
       steps: [...recipe.steps],
+      minigameSteps,
       stepScores: [],
       completed: false,
     };
@@ -439,9 +503,32 @@ export class GameScene implements Scene {
       return;
     }
 
-    // Launch the tailored interactive cooking minigame for this step!
+    // Check if this step is a Highlight Minigame or a snappy 1-tap Sous-Chef Quick Step!
+    const isHighlightMinigame = dish.minigameSteps.has(dish.currentStepIndex);
     const matchingCustomer = this.findMatchingCustomer(dish.recipe.id);
     const isLastStep = dish.currentStepIndex === dish.steps.length - 1;
+
+    const nextIdx = dish.currentStepIndex + 1;
+    const nextLabel =
+      nextIdx < dish.steps.length
+        ? STATION_LABELS[dish.steps[nextIdx].stationType]
+        : undefined;
+    this.tutorial.onStationCookStarted(nextLabel);
+
+    if (!isHighlightMinigame) {
+      // Snappy 1-tap instant Sous-Chef assist with juicy sparkle burst (eliminates tedious grind!)
+      station.state = 'done';
+      station.cookTimer = -0.3;
+      station.currentStep = null;
+      const sx = station.x + station.width / 2;
+      const sy = station.y + station.height / 2;
+      this.particles.emitStarburst(sx, sy, '#ffd166', 12);
+      this.particles.emitFloatingText(sx, sy - 20, `⚡ ${currentStep.action}!`, '#80ed99', 15);
+      dish.stepScores.push(Math.min(100, 90 + this.bonuses.minigameQualityBonus));
+      this.cats.say('golden', `Mèo Vàng phụ xong "${currentStep.action}" siêu tốc rồi nè! ⚡`, 2.4);
+      this.advanceDishStep();
+      return;
+    }
 
     station.state = 'cooking';
     station.currentStep = currentStep;
@@ -457,13 +544,6 @@ export class GameScene implements Scene {
       },
       isLastStep,
     );
-
-    const nextIdx = dish.currentStepIndex + 1;
-    const nextLabel =
-      nextIdx < dish.steps.length
-        ? STATION_LABELS[dish.steps[nextIdx].stationType]
-        : undefined;
-    this.tutorial.onStationCookStarted(nextLabel);
   }
 
   private completeActiveMinigame(): void {
@@ -482,7 +562,8 @@ export class GameScene implements Scene {
     }
 
     if (res && this.activeDish) {
-      this.activeDish.stepScores.push(res.score);
+      const boostedScore = Math.min(100, res.score + this.bonuses.minigameQualityBonus);
+      this.activeDish.stepScores.push(boostedScore);
       this.cats.say(res.catSpeaker, res.catComment, 4.0);
     }
 
@@ -532,15 +613,27 @@ export class GameScene implements Scene {
           : 85;
       const qualityMultiplier = avgScore >= 85 ? 1.4 : avgScore >= 60 ? 1.1 : 0.8;
 
-      // Patience tip multiplier
+      // Patience + Shop Upgrades + Picky Mission tip bonus!
       const patienceRatio = target.patience / target.maxPatience;
-      const tipMultiplier = patienceRatio > 0.5 ? 1.5 : patienceRatio > 0.2 ? 1.0 : 0.75;
-      const earned = Math.floor(dish.recipe.basePrice * tipMultiplier * qualityMultiplier);
+      const baseTip = patienceRatio > 0.5 ? 1.45 : patienceRatio > 0.2 ? 1.1 : 0.85;
+      const missionTip = this.levelConfig.missionType === 'picky' ? 1.25 : this.levelConfig.missionType === 'vip_critic' ? 1.35 : 1.0;
+      const earned = Math.floor(
+        dish.recipe.basePrice *
+        this.bonuses.priceMultiplier *
+        baseTip *
+        this.bonuses.tipMultiplier *
+        missionTip *
+        qualityMultiplier,
+      );
 
       this.money += earned;
       this.customersServed++;
       this.combo++;
       if (this.combo > this.maxCombo) this.maxCombo = this.combo;
+
+      // Customer happy parting quote!
+      target.speechText = avgScore >= 85 ? 'Ngon tuyệt cú mèo!! ⭐' : 'Cảm ơn hai bé mèo nha!';
+      target.speechTimer = 2.0;
 
       // Juicy serving FX: starburst, arcing gold coins to money HUD, floating payout text!
       const custCx = target.x + target.width / 2;
@@ -555,12 +648,18 @@ export class GameScene implements Scene {
         22,
       );
 
-      // Celebrate hitting 3-star milestone!
-      if (!this.reachedThreeStars && this.money >= this.levelConfig.targetScore) {
+      // Instant Wave-Clear Victory when serving all required customers!!
+      if (this.customersServed >= this.targetCustomers) {
+        this.reachedThreeStars = true;
+        this.winDelayTimer = 0.95;
+        this.particles.emitStarburst(480, 180, '#ffd166', 36);
+        this.particles.emitFloatingText(480, 170, '🎉 HOÀN THÀNH MÀN! MỞ RƯƠNG THƯỞNG!', '#ffd166', 24);
+        this.cats.say('both', 'HOÀN THÀNH ĐỦ KHÁCH RỒI!! Nhận Rương Thưởng và mở món mới thôi!! 🎉🎁', 4.5);
+      } else if (!this.reachedThreeStars && this.money >= this.levelConfig.targetScore) {
         this.reachedThreeStars = true;
         this.particles.emitStarburst(480, 140, '#ffd166', 32);
-        this.particles.emitFloatingText(480, 150, '⭐⭐⭐ ĐẠT 3 SAO! Có thể bấm "Qua màn"!', '#ffd166', 22);
-        this.cats.say('both', 'ĐẠT 3 SAO RỒI!! Bấm nút "Qua màn" góc trên hoặc bán thêm kiếm tiền nha! 🎉⭐', 5.0);
+        this.particles.emitFloatingText(480, 150, '⭐⭐⭐ ĐẠT 3 SAO!', '#ffd166', 22);
+        this.cats.say('both', 'ĐẠT 3 SAO RỒI!! Phục vụ nốt khách cuối là nhận rương thưởng nha! 🎉⭐', 5.0);
       } else if (this.combo >= 3) {
         this.cats.say('both', `COMBO x${this.combo}!! Quán đông nghẹt khách khen nức nở! 🔥⭐`, 4.2);
       } else if (avgScore >= 85) {
@@ -586,18 +685,23 @@ export class GameScene implements Scene {
   }
 
   private spawnCustomer(): boolean {
-    if (this.customers.filter((c) => !c.leaving).length >= this.levelConfig.maxCustomers) return false;
+    const activeCount = this.customers.filter((c) => !c.leaving).length;
+    if (activeCount >= this.levelConfig.maxCustomers) return false;
+    // Don't spawn beyond remaining wave quota!
+    if (this.customersServed + activeCount >= this.targetCustomers) return false;
     if (this.recipes.length === 0) return false;
 
     const recipe = randPick(this.recipes);
     const taste = generateCustomerTaste(recipe);
     const slot = this.getNextCustomerSlot();
-    const patience = randFloat(34, 46); // generous patience for tactile minigames!
+    const patience = randFloat(34, 44) * this.bonuses.patienceMultiplier;
     const pool =
       this.levelConfig.customerTypes && this.levelConfig.customerTypes.length > 0
         ? this.levelConfig.customerTypes
         : Object.values(CustomerType);
     const customerType = randPick(pool);
+    const custCfg = CUSTOMERS.find((cfg) => cfg.type === customerType);
+    const speechText = custCfg ? randPick(custCfg.speechBubbles) : 'Cho mình một phần thật ngon nha!';
 
     const customer: InlineCustomer = {
       id: this.nextCustomerId++,
@@ -615,12 +719,15 @@ export class GameScene implements Scene {
       served: false,
       leaving: false,
       warnedImpatient: false,
+      speechText,
+      speechTimer: 3.8,
       orderBubbleAlpha: 0,
     };
 
     this.customers.push(customer);
     if (!this.activeMinigame) {
-      this.cats.say('golden', `Khách mới gọi ${formatTasteSpeech(recipe, taste)}`, 4.5);
+      const custName = custCfg?.name ?? 'Khách';
+      this.cats.say('golden', `${custName}: "${speechText}" → ${formatTasteSpeech(recipe, taste)}`, 4.8);
     }
     return true;
   }
@@ -671,8 +778,23 @@ export class GameScene implements Scene {
       }
     }
 
+    // Pause while Pre-Level 2-Cat Story & Mission Briefing card is open
+    if (this.briefingOpen) {
+      this.briefingElapsed += dt;
+      return;
+    }
+
     // Pause gameplay timers & spawning while visual-novel intro/celebration modal is open
     if (this.tutorial.isModalBlocking) return;
+
+    // Brief celebration pause after finishing the wave before jumping to ResultScene!
+    if (this.winDelayTimer > 0) {
+      this.winDelayTimer -= dt;
+      if (this.winDelayTimer <= 0) {
+        this.endGame();
+      }
+      return;
+    }
 
     // Update active cooking minigame
     if (this.activeMinigame) {
@@ -724,6 +846,9 @@ export class GameScene implements Scene {
       if (c.orderBubbleAlpha < 1 && !c.leaving) {
         c.orderBubbleAlpha = Math.min(1, c.orderBubbleAlpha + 2 * dt);
       }
+      if (c.speechTimer > 0 && c.x <= c.targetX + 40) {
+        c.speechTimer -= dt;
+      }
 
       if (c.leaving) {
         c.x += 500 * dt;
@@ -774,34 +899,46 @@ export class GameScene implements Scene {
   private endGame(): void {
     this.gameOver = true;
 
-    // Calculate stars
-    const stars = this.money >= this.levelConfig.targetScore ? 3
-      : this.money >= this.levelConfig.minScore ? 2
-      : this.money > 0 ? 1
-      : 0;
+    // Calculate stars (clearing all wave customers guarantees at least 2 stars, hitting targetScore = 3 stars!)
+    const clearedWave = this.customersServed >= this.targetCustomers;
+    const stars =
+      this.money >= this.levelConfig.targetScore || (clearedWave && this.money >= this.levelConfig.minScore)
+        ? (this.money >= this.levelConfig.targetScore ? 3 : 2)
+        : this.money >= this.levelConfig.minScore ? 2
+        : this.customersServed > 0 ? 1
+        : 0;
+
+    // Level Clear Reward Chest bonus (boosted by Mèo Vàng Chiêu Tài upgrade!)
+    const rewardBonus =
+      stars > 0
+        ? Math.round((this.levelConfig.rewardBonus ?? 50) * this.bonuses.tipMultiplier)
+        : 0;
+    const totalAdded = this.money + rewardBonus;
 
     // Save progress
     this.engine.save.setLevelStars(this.levelId, stars);
-    this.engine.save.addMoney(this.money);
+    this.engine.save.addMoney(totalAdded);
     this.engine.save.updateStats({
       totalCustomersServed:
         this.engine.save.current.stats.totalCustomersServed + this.customersServed,
       totalMoneyEarned:
-        this.engine.save.current.stats.totalMoneyEarned + this.money,
+        this.engine.save.current.stats.totalMoneyEarned + totalAdded,
     });
 
     // Advance currentLevel if needed
     if (this.levelId >= this.engine.save.current.currentLevel && stars > 0) {
-      this.engine.save.update({ currentLevel: this.levelId + 1 });
+      this.engine.save.update({ currentLevel: Math.min(50, this.levelId + 1) });
     }
 
-    // Transition to ResultScene
+    // Transition to ResultScene with Reward Chest & New Dish Unlock Showcase!
     this.engine.scenes.replace(
       new ResultScene(this.engine, {
         levelId: this.levelId,
         dayName: this.levelConfig.dayName,
         customersServed: this.customersServed,
+        targetCustomers: this.targetCustomers,
         moneyEarned: this.money,
+        rewardBonus,
         stars,
         maxCombo: this.maxCombo,
         targetScore: this.levelConfig.targetScore,
@@ -878,6 +1015,11 @@ export class GameScene implements Scene {
       this.tutorial.render(ctx, W, H, this.getTutorialTarget());
     }
 
+    // --- Pre-Level 2-Cat Story & Mission Briefing Card ---
+    if (this.briefingOpen) {
+      this.renderBriefing(ctx, W, H);
+    }
+
     ctx.restore(); // end camera shake transform
 
     // --- Pause overlay ---
@@ -935,13 +1077,14 @@ export class GameScene implements Scene {
     ctx.fillStyle = '#ffd166';
     ctx.fillText('⭐'.repeat(currentStars) + '☆'.repeat(3 - currentStars), 182, 26);
 
-    // Day name (shifted gently left of center if early finish button is visible)
+    // Day name + Customer Wave Quota Counter (👥 2/3)
     ctx.textAlign = 'center';
-    ctx.font = 'bold 17px "Segoe UI", system-ui, sans-serif';
+    ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+    const centerX = this.reachedThreeStars ? 420 : W / 2 - 12;
     drawTextShadow(
       ctx,
-      this.levelConfig.dayName,
-      this.reachedThreeStars ? 420 : W / 2 - 10,
+      `${this.levelConfig.dayName}  •  👥 ${this.customersServed}/${this.targetCustomers}`,
+      centerX,
       26,
       '#FCA311',
     );
@@ -1110,6 +1253,28 @@ export class GameScene implements Scene {
         ctx.globalAlpha = 1;
       }
 
+      // Customer witty speech quote pill below counter when arriving/served!
+      if (c.speechTimer > 0 && c.speechText && c.x <= c.targetX + 30) {
+        const sAlpha = Math.min(1, c.speechTimer * 1.5);
+        ctx.save();
+        ctx.globalAlpha = sAlpha;
+        ctx.font = 'bold 11px "Segoe UI", system-ui, sans-serif';
+        const sw = Math.min(185, ctx.measureText(c.speechText).width + 16);
+        const sx = clamp(c.x + c.width / 2 - sw / 2, 10, 740 - sw);
+        const sy = c.y - 28;
+        roundRect(ctx, sx, sy, sw, 22, 8);
+        ctx.fillStyle = c.served ? 'rgba(45, 147, 72, 0.92)' : 'rgba(17, 19, 38, 0.9)';
+        ctx.fill();
+        ctx.strokeStyle = c.served ? '#80ed99' : '#FCA311';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(c.speechText, sx + sw / 2, sy + 11);
+        ctx.restore();
+      }
+
       // Served check
       if (c.served) {
         ctx.font = '28px "Segoe UI"';
@@ -1189,7 +1354,19 @@ export class GameScene implements Scene {
       const labelText = st.label.replace(/^[^\s]+\s/, ''); // clean Vietnamese name
       drawTextShadow(ctx, labelText, st.x + st.width / 2, st.y + st.height - 13, '#fff');
 
-      // State indicator overlays
+      // State indicator overlays (plus 🎮 MINI badge on highlight minigame step!)
+      if (isExpected && this.activeDish && this.activeDish.minigameSteps.has(this.activeDish.currentStepIndex) && st.state === 'idle') {
+        roundRect(ctx, st.x + st.width - 42, st.y - 8, 44, 18, 9);
+        ctx.fillStyle = '#e85d04';
+        ctx.fill();
+        ctx.strokeStyle = '#ffd166';
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+        ctx.font = 'bold 9.5px "Segoe UI", sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.fillText('🎮 CHƠI', st.x + st.width - 20, st.y + 1);
+      }
+
       if (st.state === 'cooking') {
         const progress = st.cookTimer / st.cookDuration;
         drawProgressBar(
@@ -1374,6 +1551,173 @@ export class GameScene implements Scene {
 
       ctx.restore();
     }
+  }
+
+  private renderBriefing(ctx: CanvasRenderingContext2D, W: number, H: number): void {
+    ctx.save();
+    ctx.fillStyle = 'rgba(10, 11, 24, 0.8)';
+    ctx.fillRect(0, 0, W, H);
+
+    const cardW = 680;
+    const cardH = 380;
+    const cardX = (W - cardW) / 2;
+    const cardY = 66;
+
+    roundRect(ctx, cardX, cardY, cardW, cardH, 20);
+    const bg = ctx.createLinearGradient(0, cardY, 0, cardY + cardH);
+    bg.addColorStop(0, '#231e38');
+    bg.addColorStop(1, '#141326');
+    ctx.fillStyle = bg;
+    ctx.fill();
+    ctx.strokeStyle = '#FCA311';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    // Mission type pill
+    const missionMap = {
+      classic: { text: '🎯 NHIỆM VỤ: PHỤC VỤ CHUẨN VỊ', color: '#2A9D8F' },
+      rush: { text: '⚡ GIỜ CAO ĐIỂM: KHÁCH TỚI LIÊN TỤC!', color: '#E85D04' },
+      picky: { text: '🌶️ KHÁCH KHÓ TÍNH: ĐÚNG KHẨU VỊ TIP x1.25!', color: '#E63946' },
+      vip_critic: { text: '⭐ THỬ THÁCH BOSS: GIÁM KHẢO ẨM THỰC!', color: '#D97706' },
+    };
+    const mInfo = missionMap[this.levelConfig.missionType ?? 'classic'];
+    roundRect(ctx, cardX + 150, cardY - 16, cardW - 300, 32, 16);
+    ctx.fillStyle = mInfo.color;
+    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, mInfo.text, W / 2, cardY, '#fff');
+
+    // Stage Title + Quota & Chest pills
+    ctx.font = 'bold 26px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, `Ngày ${this.levelId}: ${this.levelConfig.dayName}`, W / 2, cardY + 46, '#FCA311');
+
+    ctx.font = 'bold 14px monospace';
+    ctx.fillStyle = '#80ed99';
+    ctx.fillText(
+      `👥 Mục tiêu: ${this.targetCustomers} khách   •   🎁 Rương thưởng: +${formatMoney(this.levelConfig.rewardBonus ?? 50)}`,
+      W / 2,
+      cardY + 78,
+    );
+
+    // 2-Cat Live Story Banter (Vằn Bếp Trưởng left, Mèo Vàng right!)
+    const bob = Math.sin(this.briefingElapsed * 3.5) * 4;
+    ctx.imageSmoothingEnabled = true;
+
+    // Row 1: Vằn Bếp Trưởng
+    const r1Y = cardY + 104;
+    if (this.engine.assets.hasImage('npc_cat_boss')) {
+      const img = this.engine.assets.getImage('npc_cat_boss');
+      const dh = 92;
+      const dw = (img.width / img.height) * dh;
+      ctx.drawImage(img, cardX + 24, r1Y + bob, dw, dh);
+    }
+    roundRect(ctx, cardX + 124, r1Y + 4, cardW - 152, 80, 12);
+    ctx.fillStyle = 'rgba(252, 163, 17, 0.12)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(252, 163, 17, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#FCA311';
+    ctx.fillText('👑 Vằn Bếp Trưởng:', cardX + 138, r1Y + 12);
+    ctx.font = '14.5px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#fffcf5';
+    this.wrapBriefingText(
+      ctx,
+      this.levelConfig.introBoss ?? 'Nổi lửa lên nào, nấu thật ngon cho khách nhé!',
+      cardX + 138,
+      r1Y + 32,
+      cardW - 180,
+      20,
+    );
+
+    // Row 2: Mèo Vàng Phụ Bếp
+    const r2Y = cardY + 206;
+    if (this.engine.assets.hasImage('npc_cat_golden')) {
+      const img = this.engine.assets.getImage('npc_cat_golden');
+      const dh = 86;
+      const dw = (img.width / img.height) * dh;
+      ctx.drawImage(img, cardX + cardW - dw - 24, r2Y - bob, dw, dh);
+    }
+    roundRect(ctx, cardX + 28, r2Y + 4, cardW - 152, 80, 12);
+    ctx.fillStyle = 'rgba(244, 162, 97, 0.12)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(244, 162, 97, 0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#F4A261';
+    ctx.fillText('🐾 Mèo Vàng Phụ Bếp:', cardX + 42, r2Y + 12);
+    ctx.font = '14.5px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#fffcf5';
+    this.wrapBriefingText(
+      ctx,
+      this.levelConfig.introGolden ?? 'Em sẵn sàng phụ bếp rồi! Chốt đơn kiếm 3 sao nào!',
+      cardX + 42,
+      r2Y + 32,
+      cardW - 180,
+      20,
+    );
+
+    // Available Dish Preview Strip
+    const dishStartX = W / 2 - (this.recipes.length * 46) / 2;
+    ctx.imageSmoothingEnabled = false;
+    for (let i = 0; i < this.recipes.length; i++) {
+      const key = `food_${this.recipes[i].id}`;
+      if (this.engine.assets.hasImage(key)) {
+        ctx.drawImage(this.engine.assets.getImage(key), dishStartX + i * 46, cardY + 304, 40, 40);
+      }
+    }
+
+    // Glowing "🔥 MỞ QUÁN NGAY!" Start Button
+    const btn = this.startBriefingBtn;
+    const pulse = 1 + Math.sin(this.briefingElapsed * 5) * 0.03;
+    ctx.translate(btn.x + btn.width / 2, btn.y + btn.height / 2);
+    ctx.scale(pulse, pulse);
+    roundRect(ctx, -btn.width / 2, -btn.height / 2, btn.width, btn.height, 14);
+    ctx.fillStyle = '#e85d04';
+    ctx.fill();
+    ctx.strokeStyle = '#ffd166';
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 20px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🔥 MỞ QUÁN NGAY!', 0, 0, '#fff');
+
+    ctx.restore();
+  }
+
+  private wrapBriefingText(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    x: number,
+    y: number,
+    maxWidth: number,
+    lineHeight: number,
+  ): void {
+    const words = text.split(' ');
+    let line = '';
+    let cy = y;
+    for (const word of words) {
+      const test = line + word + ' ';
+      if (ctx.measureText(test).width > maxWidth && line) {
+        ctx.fillText(line.trim(), x, cy);
+        line = word + ' ';
+        cy += lineHeight;
+      } else {
+        line = test;
+      }
+    }
+    if (line.trim()) ctx.fillText(line.trim(), x, cy);
   }
 
   private darkenColor(hex: string, amount: number): string {

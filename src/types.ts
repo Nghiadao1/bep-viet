@@ -67,15 +67,22 @@ export interface Recipe {
 
 // --- Level ---
 
+export type LevelMissionType = 'classic' | 'rush' | 'picky' | 'vip_critic';
+
 export interface LevelConfig {
   id: number;
   chapter: number;
   dayName: string;
   targetScore: number;
   minScore: number;
-  timeLimit: number;      // seconds
+  timeLimit: number;          // seconds
+  targetCustomers?: number;   // customer wave quota — instant win when served!
+  missionType?: LevelMissionType;
+  rewardBonus?: number;       // bonus coins chest on clear
+  introBoss?: string;         // Vằn Bếp Trưởng pre-level story line
+  introGolden?: string;       // Mèo Vàng Phụ Bếp pre-level story line
   availableRecipes: string[];
-  customerSpawnRate: number; // ms between spawns
+  customerSpawnRate: number;  // ms between spawns
   maxCustomers: number;
   customerTypes: CustomerType[];
   specialEvents?: string[];
@@ -128,6 +135,7 @@ export interface SaveData {
   upgrades: Record<string, number>; // upgrade ID → level
   unlockedRecipes: string[];
   tutorialCompleted: boolean;
+  seenChapters: number[];
   settings: GameSettings;
   stats: PlayerStats;
 }
