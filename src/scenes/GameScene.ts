@@ -7,7 +7,7 @@ import type { Scene, Rect, Recipe, LevelConfig, CookingStep } from '../types';
 import { StationType, CustomerMood, CustomerType } from '../types';
 import { InputManager } from '../core/InputManager';
 import { roundRect, drawTextShadow, drawProgressBar } from '../utils/draw';
-import { formatMoney, formatTime, clamp, randFloat, randInt, randPick } from '../utils/math';
+import { formatMoney, formatTime, clamp, lerp, randFloat, randInt, randPick } from '../utils/math';
 import { RECIPES, getRecipe } from '../data/recipes';
 import { getLevel } from '../data/levels';
 import { CUSTOMERS } from '../data/customers';
@@ -112,6 +112,7 @@ export class GameScene implements Scene {
   private customersServed = 0;
   private targetCustomers = 3;
   private dishesStartedCount = 0;
+  private difficulty = 0; // Smooth 0.0 (Level 1) -> 1.0 (Level 50)
   private combo = 0;
   private maxCombo = 0;
   private winDelayTimer = 0;
@@ -199,6 +200,16 @@ export class GameScene implements Scene {
     this.timeRemaining = this.levelConfig.timeLimit;
     this.targetCustomers = this.levelConfig.targetCustomers ?? 3;
     this.bonuses = getUpgradeBonuses(this.engine.save.current);
+
+    // Smoothly scale difficulty from 0.0 (Lv 1) -> 1.0 (Lv 50) + mission modifier
+    const baseDiff = clamp((this.levelId - 1) / 49, 0, 1);
+    const missionBoost =
+      this.levelConfig.missionType === 'vip_critic' ? 0.12
+      : this.levelConfig.missionType === 'rush' ? 0.06
+      : this.levelConfig.missionType === 'picky' ? 0.04
+      : 0;
+    this.difficulty = clamp(baseDiff + missionBoost, 0, 1);
+
     this.money = 0;
     this.customersServed = 0;
     this.dishesStartedCount = 0;
@@ -440,7 +451,17 @@ export class GameScene implements Scene {
 
     const prepCount = Math.max(1, lastIdx);
     const rotIdx = this.dishesStartedCount % prepCount;
-    minigameSteps.add(rotIdx);
+
+    // Guarantee iconic Vietnamese dishes highlight their signature custom minigame!
+    if (recipe.id === 'banh_beo') {
+      minigameSteps.add(0); // 🎨 Đổ 3 chén Bánh Bèo!
+    } else if (recipe.id === 'pho_cuon' || recipe.id === 'spring_roll_platter') {
+      minigameSteps.add(2); // 🌯 Cuốn bánh tráng / cuốn rau!
+    } else if (recipe.id === 'bun_dau_mam_tom') {
+      minigameSteps.add(3); // 🌀 Đánh mắm tôm sủi bọt!
+    } else {
+      minigameSteps.add(rotIdx);
+    }
 
     // Bánh Mì always highlights Xẻ ổ bánh (0) + Thêm nhân (2) + Nướng giòn (3) for full signature feel!
     if (recipe.id.includes('banh_mi') && recipe.steps.length >= 4) {
@@ -541,6 +562,8 @@ export class GameScene implements Scene {
         step: currentStep,
         taste: matchingCustomer?.taste ?? null,
         particles: this.particles,
+        difficulty: this.difficulty,
+        variationSeed: this.dishesStartedCount,
       },
       isLastStep,
     );
@@ -692,9 +715,15 @@ export class GameScene implements Scene {
     if (this.recipes.length === 0) return false;
 
     const recipe = randPick(this.recipes);
-    const taste = generateCustomerTaste(recipe);
+    const taste = generateCustomerTaste(
+      recipe,
+      this.difficulty,
+      this.levelConfig.missionType ?? 'classic',
+    );
     const slot = this.getNextCustomerSlot();
-    const patience = randFloat(34, 44) * this.bonuses.patienceMultiplier;
+    // Smooth patience curve: relaxed 46s at Lv 1 -> intense 24s at Lv 50!
+    const basePatience = lerp(46, 24, this.difficulty);
+    const patience = basePatience * randFloat(0.92, 1.08) * this.bonuses.patienceMultiplier;
     const pool =
       this.levelConfig.customerTypes && this.levelConfig.customerTypes.length > 0
         ? this.levelConfig.customerTypes
@@ -804,8 +833,9 @@ export class GameScene implements Scene {
       }
     }
 
-    // Gentle 45% speed during minigames so 60-85s rounds feel brisk and fair
-    const worldDt = this.activeMinigame ? dt * 0.45 : dt;
+    // Smoothly scale world-time slowdown during minigames (0.38x early -> 0.58x late!)
+    const minigameTimeScale = lerp(0.38, 0.58, this.difficulty);
+    const worldDt = this.activeMinigame ? dt * minigameTimeScale : dt;
 
     // Level timer (frozen during initial guided prompts so player can read safely)
     if (!this.tutorial.shouldFreezeTimers) {
@@ -1589,17 +1619,63 @@ export class GameScene implements Scene {
     ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
     drawTextShadow(ctx, mInfo.text, W / 2, cardY, '#fff');
 
-    // Stage Title + Quota & Chest pills
+    // Stage Title
     ctx.font = 'bold 26px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, `Ngày ${this.levelId}: ${this.levelConfig.dayName}`, W / 2, cardY + 46, '#FCA311');
+    drawTextShadow(ctx, `Ngày ${this.levelId}: ${this.levelConfig.dayName}`, W / 2, cardY + 44, '#FCA311');
 
-    ctx.font = 'bold 14px monospace';
+    // Row of 2 sleek info pills: Left = Quota & Reward Chest, Right = Smooth Difficulty Meter!
+    const pillY = cardY + 66;
+    const pillH = 28;
+
+    // Left pill: Quota & Chest
+    roundRect(ctx, cardX + 28, pillY, 356, pillH, 10);
+    ctx.fillStyle = 'rgba(76, 175, 80, 0.14)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(128, 237, 153, 0.4)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 13px monospace';
     ctx.fillStyle = '#80ed99';
     ctx.fillText(
-      `👥 Mục tiêu: ${this.targetCustomers} khách   •   🎁 Rương thưởng: +${formatMoney(this.levelConfig.rewardBonus ?? 50)}`,
-      W / 2,
-      cardY + 78,
+      `👥 ${this.targetCustomers} khách  •  🎁 Rương: +${formatMoney(this.levelConfig.rewardBonus ?? 50)}`,
+      cardX + 28 + 178,
+      pillY + pillH / 2,
     );
+
+    // Right pill: Visual Difficulty Tier & 5-pip Heat Meter
+    const diffTier =
+      this.difficulty < 0.22
+        ? { label: '🌱 Dễ', color: '#4CAF50' }
+        : this.difficulty < 0.5
+          ? { label: '🔥 Trung bình', color: '#FCA311' }
+          : this.difficulty < 0.78
+            ? { label: '⚡ Khó', color: '#E85D04' }
+            : { label: '👑 Siêu Đầu Bếp', color: '#E63946' };
+    const filledPips = clamp(Math.ceil(this.difficulty * 5), 1, 5);
+    const dPillX = cardX + 396;
+    const dPillW = 256;
+
+    roundRect(ctx, dPillX, pillY, dPillW, pillH, 10);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
+    ctx.fill();
+    ctx.strokeStyle = diffTier.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    ctx.textAlign = 'left';
+    ctx.font = 'bold 12.5px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = diffTier.color;
+    ctx.fillText(diffTier.label, dPillX + 10, pillY + pillH / 2);
+
+    // 5 difficulty heat pips on right side of pill
+    const pipStartX = dPillX + dPillW - 76;
+    for (let p = 0; p < 5; p++) {
+      roundRect(ctx, pipStartX + p * 13, pillY + 8, 9, 12, 3);
+      ctx.fillStyle = p < filledPips ? diffTier.color : 'rgba(255,255,255,0.16)';
+      ctx.fill();
+    }
 
     // 2-Cat Live Story Banter (Vằn Bếp Trưởng left, Mèo Vàng right!)
     const bob = Math.sin(this.briefingElapsed * 3.5) * 4;

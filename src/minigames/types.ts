@@ -23,6 +23,10 @@ export interface MinigameContext {
   step: CookingStep;
   taste: CustomerTasteOrder | null;
   particles: ParticleSystem;
+  /** Smoothly scaled difficulty from 0.0 (Level 1) to 1.0 (Level 50) */
+  difficulty: number;
+  /** Rotation counter to vary minigames between bowls */
+  variationSeed: number;
 }
 
 export interface CookingMinigame {

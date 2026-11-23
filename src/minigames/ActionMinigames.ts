@@ -9,7 +9,7 @@
 import type { Rect, Vec2 } from '../types';
 import { InputManager } from '../core/InputManager';
 import { roundRect, drawTextShadow, drawProgressBar } from '../utils/draw';
-import { clamp } from '../utils/math';
+import { clamp, lerp } from '../utils/math';
 import {
   BOARD_RECT,
   gradeFromScore,
@@ -37,10 +37,14 @@ export class FirePumpMinigame implements CookingMinigame {
   private finishTimer = 0;
 
   private temp = 28;         // 0..100
-  private boilProgress = 0;  // 0..1 (fill in ~2.2s inside sweet spot)
+  private boilProgress = 0;  // 0..1
   private overheatPenalty = 0;
   private holding = false;
   private flameBurst = 0;
+  private coolRate: number;
+  private sweetMin: number;
+  private sweetMax: number;
+  private boilDuration: number;
   private catQuote = 'Chạm nút THỔI LỬA liên tục để nước sôi chuẩn vị nào!';
 
   private pumpBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
@@ -48,6 +52,11 @@ export class FirePumpMinigame implements CookingMinigame {
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
     this.title = `🔥 ${ctx.step.action} — ${ctx.recipe.name}`;
+    const d = clamp(ctx.difficulty, 0, 1);
+    this.coolRate = lerp(20, 32, d);
+    this.sweetMin = lerp(46, 56, d);
+    this.sweetMax = lerp(84, 75, d);
+    this.boilDuration = lerp(1.4, 2.0, d);
   }
 
   onDown(pos: Vec2): void {
@@ -76,25 +85,25 @@ export class FirePumpMinigame implements CookingMinigame {
       return;
     }
 
-    // Holding gently pumps fire; releasing cools pot down
+    // Holding gently pumps fire; releasing cools pot down (faster cooling at higher levels)
     if (this.holding) {
       this.temp = clamp(this.temp + 42 * dt, 0, 100);
       if (Math.random() < dt * 18) {
         this.ctx.particles.emitFireSparks(BOARD_RECT.x + BOARD_RECT.width / 2, 286, 2);
       }
     } else {
-      this.temp = clamp(this.temp - 24 * dt, 0, 100);
+      this.temp = clamp(this.temp - this.coolRate * dt, 0, 100);
     }
 
-    // Sweet spot: 50..82 (snappy 1.55s boil!)
-    if (this.temp >= 50 && this.temp <= 82) {
-      this.boilProgress = Math.min(1, this.boilProgress + dt / 1.55);
+    // Sweet spot scales smoothly with difficulty!
+    if (this.temp >= this.sweetMin && this.temp <= this.sweetMax) {
+      this.boilProgress = Math.min(1, this.boilProgress + dt / this.boilDuration);
       if (Math.random() < dt * 10) {
         this.ctx.particles.emitSteam(BOARD_RECT.x + BOARD_RECT.width / 2, 174, 1);
       }
       this.catQuote = 'Sôi sùng sục rồi! Giữ đều ngọn lửa trong vùng xanh nhé! 🔥';
-    } else if (this.temp > 82) {
-      this.boilProgress = Math.min(1, this.boilProgress + dt / 2.8);
+    } else if (this.temp > this.sweetMax) {
+      this.boilProgress = Math.min(1, this.boilProgress + dt / (this.boilDuration * 1.8));
       this.overheatPenalty = Math.min(35, this.overheatPenalty + 22 * dt);
       if (Math.random() < dt * 14) {
         this.ctx.particles.emitSteam(BOARD_RECT.x + BOARD_RECT.width / 2, 165, 2);
@@ -179,16 +188,18 @@ export class FirePumpMinigame implements CookingMinigame {
     ctx.fillStyle = '#1f2937';
     ctx.fill();
 
-    // Cold zone (0..52), Sweet boiling zone (52..80), Overheat zone (80..100)
+    // Cold zone (0..sweetMin), Sweet boiling zone (sweetMin..sweetMax), Overheat zone (sweetMax..100)
+    const minFrac = this.sweetMin / 100;
+    const maxFrac = this.sweetMax / 100;
     ctx.save();
     roundRect(ctx, barX, barY, barW, barH, 11);
     ctx.clip();
     ctx.fillStyle = 'rgba(59, 130, 246, 0.35)';
-    ctx.fillRect(barX, barY, barW * 0.52, barH);
+    ctx.fillRect(barX, barY, barW * minFrac, barH);
     ctx.fillStyle = 'rgba(76, 175, 80, 0.85)';
-    ctx.fillRect(barX + barW * 0.52, barY, barW * 0.28, barH);
+    ctx.fillRect(barX + barW * minFrac, barY, barW * (maxFrac - minFrac), barH);
     ctx.fillStyle = 'rgba(230, 57, 70, 0.8)';
-    ctx.fillRect(barX + barW * 0.8, barY, barW * 0.2, barH);
+    ctx.fillRect(barX + barW * maxFrac, barY, barW * (1 - maxFrac), barH);
     ctx.restore();
 
     roundRect(ctx, barX, barY, barW, barH, 11);
@@ -242,7 +253,7 @@ export class FirePumpMinigame implements CookingMinigame {
 
 export class TimingCutMinigame implements CookingMinigame {
   readonly title: string;
-  readonly instruction = 'Bấm đúng lúc kim đi vào vùng vàng (3 lần)!';
+  readonly instruction: string;
   readonly catSpeaker = 'golden' as const;
 
   done = false;
@@ -254,16 +265,25 @@ export class TimingCutMinigame implements CookingMinigame {
 
   private cursor = 0;         // 0..1 oscillating
   private dir = 1;
-  private speed = 1.15;
-  private hits: number[] = []; // scores 0..100 for 3 cuts
+  private speed: number;
+  private targetCuts: number;
+  private perfectTol: number;
+  private goodTol: number;
+  private hits: number[] = [];
   private popups: Array<{ text: string; color: string; y: number; alpha: number }> = [];
-  private catQuote = 'Canh kim chạy vô giữa vùng vàng rồi bấm CẮT ngay nha!';
+  private catQuote = 'Canh kim chạy vô giữa vùng xanh rồi bấm CẮT ngay nha!';
 
   private cutBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
 
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
+    const d = clamp(ctx.difficulty, 0, 1);
+    this.targetCuts = d > 0.55 ? 4 : 3;
+    this.speed = lerp(0.95, 1.75, d);
+    this.perfectTol = lerp(0.11, 0.065, d);
+    this.goodTol = lerp(0.22, 0.145, d);
     this.title = `⏱️ ${ctx.step.action} — ${ctx.recipe.name}`;
+    this.instruction = `Bấm đúng lúc kim đi vào vùng xanh (${this.targetCuts} lần)!`;
   }
 
   onDown(pos: Vec2): void {
@@ -280,18 +300,18 @@ export class TimingCutMinigame implements CookingMinigame {
     let color: string;
 
     const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
-    if (dist <= 0.095) {
+    if (dist <= this.perfectTol) {
       hitScore = 100;
       label = '⭐ HOÀN HẢO!';
       color = '#4CAF50';
       this.ctx.particles.emitStarburst(cx, 205, '#ffd166', 14);
       this.catQuote = 'Nhát cắt chuẩn như máy luôn!! Tiếp nào anh/chị ơi! ✨';
-    } else if (dist <= 0.2) {
+    } else if (dist <= this.goodTol) {
       hitScore = 78;
       label = '👍 CHUẨN RỒI!';
       color = '#FCA311';
       this.ctx.particles.emitSliceSparks(cx, 205, '#fff3b0', 10);
-      this.catQuote = 'Ngon lành! Cố canh sát tâm vàng hơn chút nữa nhé!';
+      this.catQuote = 'Ngon lành! Cố canh sát tâm xanh hơn chút nữa nhé!';
     } else {
       hitScore = 45;
       label = '😅 HƠI LỆCH!';
@@ -302,9 +322,9 @@ export class TimingCutMinigame implements CookingMinigame {
 
     this.hits.push(hitScore);
     this.popups.push({ text: label, color, y: 245, alpha: 1 });
-    this.speed += 0.16;
+    this.speed += lerp(0.12, 0.22, this.ctx.difficulty);
 
-    if (this.hits.length >= 3) {
+    if (this.hits.length >= this.targetCuts) {
       const avg = Math.round(this.hits.reduce((a, b) => a + b, 0) / this.hits.length);
       const grade = gradeFromScore(avg);
       this.ctx.particles.emitStarburst(cx, 220, '#4CAF50', 22);
@@ -390,9 +410,11 @@ export class TimingCutMinigame implements CookingMinigame {
       ctx.stroke();
     }
 
-    // Cut counter badges (3 dots)
-    for (let i = 0; i < 3; i++) {
-      const dx = cx - 44 + i * 44;
+    // Cut counter badges (3 or 4 dots centered cleanly)
+    const dotSpacing = 44;
+    const dotStartX = cx - ((this.targetCuts - 1) * dotSpacing) / 2;
+    for (let i = 0; i < this.targetCuts; i++) {
+      const dx = dotStartX + i * dotSpacing;
       ctx.beginPath();
       ctx.arc(dx, 134, 12, 0, Math.PI * 2);
       ctx.fillStyle = i < this.hits.length
@@ -419,14 +441,14 @@ export class TimingCutMinigame implements CookingMinigame {
     ctx.fillStyle = '#1e293b';
     ctx.fill();
 
-    // Good zone (0.31..0.69) and Perfect gold zone (0.415..0.585)
+    // Dynamic Good & Perfect zones scaled smoothly by difficulty!
     ctx.save();
     roundRect(ctx, barX, barY, barW, barH, 12);
     ctx.clip();
     ctx.fillStyle = 'rgba(252, 163, 17, 0.35)';
-    ctx.fillRect(barX + barW * 0.31, barY, barW * 0.38, barH);
+    ctx.fillRect(barX + barW * (0.5 - this.goodTol), barY, barW * (this.goodTol * 2), barH);
     ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(barX + barW * 0.415, barY, barW * 0.17, barH);
+    ctx.fillRect(barX + barW * (0.5 - this.perfectTol), barY, barW * (this.perfectTol * 2), barH);
     ctx.restore();
 
     roundRect(ctx, barX, barY, barW, barH, 12);
@@ -504,17 +526,20 @@ export class SliceLineMinigame implements CookingMinigame {
   private trail: Vec2[] = [];
   private maxDeviation = 0;
   private startedNearStart = false;
+  private perfectDev: number;
+  private goodDev: number;
   private catQuote: string;
 
   constructor(ctx: MinigameContext, isBread = false) {
     this.ctx = ctx;
     this.isBread = isBread;
+    const d = clamp(ctx.difficulty, 0, 1);
+    this.perfectDev = lerp(26, 16, d);
+    this.goodDev = lerp(46, 30, d);
+
     this.title = isBread
       ? `🥖 Xẻ Ổ Bánh Mì — ${ctx.recipe.name}`
       : `🔪 ${ctx.step.action} — ${ctx.recipe.name}`;
-    this.instruction = isBread
-      ? 'Kéo dao từ chấm xanh sang đỏ để xẻ đôi ổ bánh mì!'
-      : 'Kéo dao dọc theo 3 đường kẻ để thái lát thịt đều!';
     this.catQuote = isBread
       ? 'Cầm dao xẻ dọc thân bánh mì thật gọn gàng để kẹp nhân nhé!'
       : 'Kéo dao dứt khoát từ chấm xanh 🟢 tới chấm đỏ 🔴 theo đúng đường kẻ!';
@@ -526,13 +551,30 @@ export class SliceLineMinigame implements CookingMinigame {
         { x1: cx - 155, y1: 266, x2: cx + 155, y2: 266, completed: false, score: 0 },
         { x1: cx - 75, y1: 215, x2: cx + 75, y2: 315, completed: false, score: 0 },
       ];
+      this.instruction = 'Kéo dao từ chấm xanh sang đỏ để xẻ đôi ổ bánh mì!';
     } else {
-      // 3 clean vertical/angled butcher slices across meat slab
-      this.lines = [
-        { x1: cx - 95, y1: 175, x2: cx - 75, y2: 355, completed: false, score: 0 },
-        { x1: cx - 10, y1: 175, x2: cx + 10, y2: 355, completed: false, score: 0 },
-        { x1: cx + 75, y1: 175, x2: cx + 95, y2: 355, completed: false, score: 0 },
-      ];
+      // Smoothly scales from 2 cuts (early levels) -> 3 cuts (mid) -> 4 precision cuts (late)!
+      const lineCount = d < 0.15 ? 2 : d > 0.65 ? 4 : 3;
+      this.instruction = `Kéo dao dọc theo ${lineCount} đường kẻ để thái lát thịt đều!`;
+      if (lineCount === 2) {
+        this.lines = [
+          { x1: cx - 60, y1: 175, x2: cx - 40, y2: 355, completed: false, score: 0 },
+          { x1: cx + 40, y1: 175, x2: cx + 60, y2: 355, completed: false, score: 0 },
+        ];
+      } else if (lineCount === 4) {
+        this.lines = [
+          { x1: cx - 115, y1: 175, x2: cx - 98, y2: 355, completed: false, score: 0 },
+          { x1: cx - 42, y1: 175, x2: cx - 25, y2: 355, completed: false, score: 0 },
+          { x1: cx + 28, y1: 175, x2: cx + 45, y2: 355, completed: false, score: 0 },
+          { x1: cx + 98, y1: 175, x2: cx + 115, y2: 355, completed: false, score: 0 },
+        ];
+      } else {
+        this.lines = [
+          { x1: cx - 95, y1: 175, x2: cx - 75, y2: 355, completed: false, score: 0 },
+          { x1: cx - 10, y1: 175, x2: cx + 10, y2: 355, completed: false, score: 0 },
+          { x1: cx + 75, y1: 175, x2: cx + 95, y2: 355, completed: false, score: 0 },
+        ];
+      }
     }
   }
 
@@ -606,10 +648,10 @@ export class SliceLineMinigame implements CookingMinigame {
     const guide = this.lines[this.activeLineIdx];
     if (!guide) return;
 
-    // Accuracy scoring based on deviation from dotted line
+    // Accuracy scoring based on deviation from dotted line (tightens slightly at higher difficulty)
     const accuracyScore =
-      this.maxDeviation <= 22 ? 100
-      : this.maxDeviation <= 40 ? 82
+      this.maxDeviation <= this.perfectDev ? 100
+      : this.maxDeviation <= this.goodDev ? 82
       : 60;
 
     guide.completed = true;
@@ -827,7 +869,10 @@ export class GrillFlipMinigame implements CookingMinigame {
   private finishTimer = 0;
 
   private side = 1;            // 1 or 2
-  private cook = 0;            // 0..1 (sweet spot 0.62..0.86)
+  private cook = 0;            // 0..1
+  private searSpeed: number;
+  private sweetMin: number;
+  private sweetMax: number;
   private sideScores: number[] = [];
   private flipAnim = 0;        // jump animation when flipping
   private catQuote = 'Nghe tiếng xèo xèo chưa? Canh kim vào vùng vàng ươm rồi lật nha!';
@@ -837,6 +882,10 @@ export class GrillFlipMinigame implements CookingMinigame {
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
     this.title = `🔥 ${ctx.step.action} — ${ctx.recipe.name}`;
+    const d = clamp(ctx.difficulty, 0, 1);
+    this.searSpeed = lerp(0.45, 0.82, d);
+    this.sweetMin = lerp(0.56, 0.66, d);
+    this.sweetMax = lerp(0.88, 0.82, d);
   }
 
   onDown(pos: Vec2): void {
@@ -849,20 +898,20 @@ export class GrillFlipMinigame implements CookingMinigame {
   private flipOrFinish(): void {
     const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
     let sScore: number;
-    if (this.cook >= 0.6 && this.cook <= 0.88) {
+    if (this.cook >= this.sweetMin && this.cook <= this.sweetMax) {
       sScore = 100;
       this.ctx.particles.emitStarburst(cx, 224, '#ffd166', 16);
       this.ctx.particles.emitFireSparks(cx, 232, 14);
       this.catQuote = 'Vàng ươm thơm nức cả khu phố!! Đúng chuẩn bếp than hoa! ⭐';
-    } else if (this.cook >= 0.44 && this.cook <= 0.94) {
+    } else if (this.cook >= this.sweetMin - 0.16 && this.cook <= Math.min(0.96, this.sweetMax + 0.08)) {
       sScore = 74;
       this.ctx.particles.emitFireSparks(cx, 232, 10);
-      this.catQuote = this.cook < 0.6 ? 'Hơi non chút xíu nhưng vẫn ngon!' : 'Suýt cháy cạnh rồi đó nha! 😅';
+      this.catQuote = this.cook < this.sweetMin ? 'Hơi non chút xíu nhưng vẫn ngon!' : 'Suýt cháy cạnh rồi đó nha! 😅';
     } else {
       sScore = 40;
       this.ctx.particles.emitAngryPuff(cx, 224);
       this.ctx.particles.shake(5, 0.2);
-      this.catQuote = this.cook < 0.44 ? 'Còn sống nhăn à! Chờ chín thêm chút nữa!' : 'Á cháy đen thui rồi!! 🙀';
+      this.catQuote = this.cook < this.sweetMin - 0.16 ? 'Còn sống nhăn à! Chờ chín thêm chút nữa!' : 'Á cháy đen thui rồi!! 🙀';
     }
 
     this.sideScores.push(sScore);
@@ -909,7 +958,7 @@ export class GrillFlipMinigame implements CookingMinigame {
       this.ctx.particles.emitFireSparks(cx, 240, 1);
     }
 
-    this.cook += 0.56 * dt;
+    this.cook += this.searSpeed * dt;
     if (this.cook >= 1) {
       this.cook = 1;
       this.flipOrFinish(); // auto-burn if never flipped
@@ -961,9 +1010,9 @@ export class GrillFlipMinigame implements CookingMinigame {
     const flipScaleY = this.flipAnim > 0 ? Math.max(0.2, Math.abs(Math.cos((this.flipAnim / 0.35) * Math.PI))) : 1;
 
     const meatColor =
-      this.cook < 0.45 ? '#e07a7a'
-      : this.cook < 0.62 ? '#d98a4e'
-      : this.cook <= 0.86 ? '#b5561d'
+      this.cook < this.sweetMin * 0.7 ? '#e07a7a'
+      : this.cook < this.sweetMin ? '#d98a4e'
+      : this.cook <= this.sweetMax ? '#b5561d'
       : '#2c1810';
 
     ctx.save();
@@ -996,7 +1045,7 @@ export class GrillFlipMinigame implements CookingMinigame {
     ctx.font = 'bold 15px "Segoe UI", system-ui, sans-serif';
     drawTextShadow(ctx, `Mặt ${this.side} / 2`, cx, 146, '#ffd166');
 
-    // Doneness gauge bar (0..1, green sweet spot 0.62..0.86)
+    // Doneness gauge bar (0..1, green sweet spot scales smoothly with difficulty!)
     const barX = b.x + 70;
     const barY = 308;
     const barW = b.width - 140;
@@ -1010,11 +1059,11 @@ export class GrillFlipMinigame implements CookingMinigame {
     roundRect(ctx, barX, barY, barW, barH, 12);
     ctx.clip();
     ctx.fillStyle = 'rgba(244, 162, 97, 0.35)';
-    ctx.fillRect(barX, barY, barW * 0.62, barH);
+    ctx.fillRect(barX, barY, barW * this.sweetMin, barH);
     ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(barX + barW * 0.62, barY, barW * 0.24, barH);
+    ctx.fillRect(barX + barW * this.sweetMin, barY, barW * (this.sweetMax - this.sweetMin), barH);
     ctx.fillStyle = '#E63946';
-    ctx.fillRect(barX + barW * 0.86, barY, barW * 0.14, barH);
+    ctx.fillRect(barX + barW * this.sweetMax, barY, barW * (1 - this.sweetMax), barH);
     ctx.restore();
 
     roundRect(ctx, barX, barY, barW, barH, 12);
@@ -1030,7 +1079,7 @@ export class GrillFlipMinigame implements CookingMinigame {
     // Flip / Done button
     const btn = this.flipBtn;
     roundRect(ctx, btn.x, btn.y, btn.width, btn.height, 14);
-    ctx.fillStyle = this.cook >= 0.62 && this.cook <= 0.86 ? '#4CAF50' : '#e85d04';
+    ctx.fillStyle = this.cook >= this.sweetMin && this.cook <= this.sweetMax ? '#4CAF50' : '#e85d04';
     ctx.fill();
     ctx.strokeStyle = '#ffd166';
     ctx.lineWidth = 2;

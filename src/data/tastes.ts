@@ -4,7 +4,7 @@
 // (e.g. +Quẩy, +Tương ớt, 🚫 Không hành, +Pate, +Cốt dừa...)
 // ============================================================
 
-import type { Recipe } from '../types';
+import type { LevelMissionType, Recipe } from '../types';
 import { randPick, shuffle } from '../utils/math';
 
 export interface ToppingOption {
@@ -85,16 +85,31 @@ export function getToppingPoolForRecipe(recipe: Recipe): ToppingOption[] {
   return PHO_NOODLE_TOPPINGS;
 }
 
-/** Generate a realistic Vietnamese customer taste order for a recipe */
-export function generateCustomerTaste(recipe: Recipe): CustomerTasteOrder {
+/**
+ * Generate a realistic Vietnamese customer taste order scaled by level difficulty!
+ * - Early levels (difficulty < 0.12): 1-2 wanted, gentle forbidden chance (35%)
+ * - Mid levels (0.12..0.55): 2 wanted, 70% forbidden chance
+ * - Late levels / Picky / VIP Boss: 2-3 wanted, 90% forbidden chance!
+ */
+export function generateCustomerTaste(
+  recipe: Recipe,
+  difficulty = 0,
+  missionType: LevelMissionType = 'classic',
+): CustomerTasteOrder {
   const pool = getToppingPoolForRecipe(recipe);
   const shuffled = shuffle([...pool]);
 
-  // 2 wanted toppings
-  const wanted = shuffled.slice(0, 2);
+  const isPicky = missionType === 'picky' || missionType === 'vip_critic';
+  let wantedCount = 2;
+  if (difficulty < 0.04 && !isPicky) {
+    wantedCount = 1; // Level 1-2 ultra approachable!
+  } else if (difficulty >= 0.45 || (isPicky && difficulty >= 0.15)) {
+    wantedCount = 3; // Challenging 3-topping combinations in later chapters!
+  }
+  const wanted = shuffled.slice(0, wantedCount);
 
-  // 65% chance customer also forbids 1 classic ingredient (like "Không hành!" or "Không ớt!")
-  const forbidCandidates = shuffled.slice(2).filter(
+  const forbidChance = isPicky ? 0.92 : Math.min(0.88, 0.35 + difficulty * 0.65);
+  const forbidCandidates = shuffled.slice(wantedCount).filter(
     (t) =>
       t.id === 'hanh' ||
       t.id === 'ngo' ||
@@ -106,7 +121,7 @@ export function generateCustomerTaste(recipe: Recipe): CustomerTasteOrder {
       t.id === 'da_vien',
   );
   const forbidden =
-    forbidCandidates.length > 0 && Math.random() < 0.7
+    forbidCandidates.length > 0 && Math.random() < forbidChance
       ? randPick(forbidCandidates)
       : null;
 

@@ -9,7 +9,7 @@
 import type { Rect, Vec2 } from '../types';
 import { InputManager } from '../core/InputManager';
 import { roundRect, drawTextShadow } from '../utils/draw';
-import { clamp, randFloat, shuffle } from '../utils/math';
+import { clamp, lerp, randFloat, shuffle } from '../utils/math';
 import { generateCustomerTaste, type CustomerTasteOrder, type ToppingOption } from '../data/tastes';
 import {
   BOARD_RECT,
@@ -38,7 +38,7 @@ interface VeggieItem {
 
 export class VeggiePrepMinigame implements CookingMinigame {
   readonly title: string;
-  readonly instruction = 'Chạm nhặt hết 5 rau tươi xanh — tránh lá úa & sâu!';
+  readonly instruction: string;
   readonly catSpeaker = 'golden' as const;
 
   done = false;
@@ -48,26 +48,33 @@ export class VeggiePrepMinigame implements CookingMinigame {
   private elapsed = 0;
   private finishTimer = 0;
   private items: VeggieItem[] = [];
+  private targetFresh: number;
   private mistakes = 0;
   private catQuote = 'Nhặt nhanh mấy cọng rau xanh mướt bỏ vô tô nha, né lá úa ra!';
 
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
+    const d = clamp(ctx.difficulty, 0, 1);
+    const freshCount = d < 0.15 ? 4 : d < 0.5 ? 5 : 6;
+    const badCount = d < 0.15 ? 1 : d < 0.5 ? 2 : 3;
+    this.targetFresh = freshCount;
     this.title = `🥗 ${ctx.step.action} — ${ctx.recipe.name}`;
+    this.instruction = `Chạm nhặt hết ${freshCount} rau tươi xanh — tránh lá úa & sâu!`;
 
-    // Place 5 fresh herbs + 2 wilted/bug items on non-overlapping basket slots
+    // 9 clean non-overlapping basket slots so up to 6 fresh + 3 bad never collide!
     const slots = shuffle([
-      { x: 325, y: 215 }, { x: 425, y: 195 }, { x: 530, y: 205 }, { x: 630, y: 220 },
-      { x: 355, y: 310 }, { x: 475, y: 300 }, { x: 595, y: 315 },
+      { x: 318, y: 215 }, { x: 416, y: 194 }, { x: 522, y: 194 }, { x: 626, y: 215 },
+      { x: 344, y: 288 }, { x: 432, y: 274 }, { x: 528, y: 274 }, { x: 616, y: 288 },
+      { x: 480, y: 332 },
     ]);
-    const freshEmojis = ['🥬', '🌿', '🌱', '🥒', '🥕'];
-    const badEmojis = ['🍂', '🐛'];
+    const freshEmojis = ['🥬', '🌿', '🌱', '🥒', '🥕', '🫑'];
+    const badEmojis = ['🍂', '🐛', '🥀'];
 
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < freshCount; i++) {
       this.items.push({
-        x: slots[i].x + randFloat(-10, 10),
-        y: slots[i].y + randFloat(-8, 8),
-        r: 34,
+        x: slots[i].x + randFloat(-6, 6),
+        y: slots[i].y + randFloat(-5, 5),
+        r: 31,
         emoji: freshEmojis[i % freshEmojis.length],
         fresh: true,
         picked: false,
@@ -75,12 +82,12 @@ export class VeggiePrepMinigame implements CookingMinigame {
         phase: i * 1.1,
       });
     }
-    for (let i = 0; i < 2; i++) {
+    for (let i = 0; i < badCount; i++) {
       this.items.push({
-        x: slots[5 + i].x + randFloat(-8, 8),
-        y: slots[5 + i].y + randFloat(-6, 6),
-        r: 30,
-        emoji: badEmojis[i],
+        x: slots[freshCount + i].x + randFloat(-6, 6),
+        y: slots[freshCount + i].y + randFloat(-5, 5),
+        r: 28,
+        emoji: badEmojis[i % badEmojis.length],
         fresh: false,
         picked: false,
         shake: 0,
@@ -192,7 +199,7 @@ export class VeggiePrepMinigame implements CookingMinigame {
     const picked = this.items.filter((it) => it.fresh && it.picked).length;
     ctx.textAlign = 'center';
     ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, `Rau tươi đã nhặt: ${picked} / 5`, cx, 138, '#80ed99');
+    drawTextShadow(ctx, `Rau tươi đã nhặt: ${picked} / ${this.targetFresh}`, cx, 138, '#80ed99');
     ctx.restore();
 
     if (this.result) {
@@ -226,7 +233,7 @@ export class SeasoningMinigame implements CookingMinigame {
 
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
-    this.taste = ctx.taste ?? generateCustomerTaste(ctx.recipe);
+    this.taste = ctx.taste ?? generateCustomerTaste(ctx.recipe, ctx.difficulty);
     this.title = `🧂 Nêm Gia Vị & Topping — ${ctx.recipe.name}`;
 
     const wantsText = this.taste.wanted.map((w) => w.label).join(' + ');
@@ -379,28 +386,34 @@ export class SeasoningMinigame implements CookingMinigame {
     ctx.fillStyle = '#3d281c';
     ctx.fillText('📋 PHIẾU KHẨU VỊ:', ticketX + 14, ticketY + ticketH / 2);
 
-    // Draw wanted & forbidden badges inside ticket
-    let bx = ticketX + 158;
+    // Draw wanted & forbidden badges inside ticket (compact cleanly when 3+ wanted!)
+    const compact = this.taste.wanted.length >= 3;
+    let bx = ticketX + (compact ? 148 : 158);
+    const badgeGap = compact ? 6 : 10;
+    const badgePad = compact ? 12 : 18;
+    const badgeFont = compact ? 'bold 12px "Segoe UI", system-ui, sans-serif' : 'bold 13px "Segoe UI", system-ui, sans-serif';
+
     for (const w of this.taste.wanted) {
       const done = this.selected.has(w.id);
-      const text = `${done ? '✅' : '+'} ${w.emoji} ${w.label}`;
-      ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
-      const tw = ctx.measureText(text).width + 18;
+      const label = compact ? w.shortLabel : w.label;
+      const text = `${done ? '✅' : '+'} ${w.emoji} ${label}`;
+      ctx.font = badgeFont;
+      const tw = ctx.measureText(text).width + badgePad;
       roundRect(ctx, bx, ticketY + 11, tw, 32, 8);
       ctx.fillStyle = done ? '#2d9348' : '#e85d04';
       ctx.fill();
       ctx.textAlign = 'center';
       ctx.fillStyle = '#fff';
       ctx.fillText(text, bx + tw / 2, ticketY + ticketH / 2);
-      bx += tw + 10;
+      bx += tw + badgeGap;
     }
 
     if (this.taste.forbidden) {
       const f = this.taste.forbidden;
       const violated = this.selected.has(f.id);
-      const text = `🚫 KHÔNG ${f.emoji} ${f.shortLabel}`;
-      ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
-      const tw = ctx.measureText(text).width + 18;
+      const text = compact ? `🚫 ${f.emoji} ${f.shortLabel}` : `🚫 KHÔNG ${f.emoji} ${f.shortLabel}`;
+      ctx.font = badgeFont;
+      const tw = ctx.measureText(text).width + badgePad;
       roundRect(ctx, bx, ticketY + 11, tw, 32, 8);
       ctx.fillStyle = violated ? '#d00000' : '#475569';
       ctx.fill();
@@ -489,7 +502,7 @@ export class SeasoningMinigame implements CookingMinigame {
 
 export class WokTossMinigame implements CookingMinigame {
   readonly title: string;
-  readonly instruction = 'Bấm HẤT CHẢO đúng lúc vòng lửa vàng sáng (3 lần)!';
+  readonly instruction: string;
   readonly catSpeaker = 'boss' as const;
 
   done = false;
@@ -500,6 +513,9 @@ export class WokTossMinigame implements CookingMinigame {
   private finishTimer = 0;
 
   private tossCount = 0;
+  private targetTosses: number;
+  private shrinkSpeed: number;
+  private sweetTol: number;
   private scores: number[] = [];
   private pulsePhase = 0;     // 0..1 ring shrinking onto center
   private tossAnim = 0;       // ingredients flying up in arc
@@ -509,7 +525,12 @@ export class WokTossMinigame implements CookingMinigame {
 
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
+    const d = clamp(ctx.difficulty, 0, 1);
+    this.targetTosses = d > 0.6 ? 4 : 3;
+    this.shrinkSpeed = lerp(0.62, 1.05, d);
+    this.sweetTol = lerp(0.18, 0.11, d);
     this.title = `🍳 ${ctx.step.action} — ${ctx.recipe.name}`;
+    this.instruction = `Bấm HẤT CHẢO đúng lúc vòng lửa vàng sáng (${this.targetTosses} lần)!`;
   }
 
   onDown(pos: Vec2): void {
@@ -522,7 +543,7 @@ export class WokTossMinigame implements CookingMinigame {
   private doToss(): void {
     const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
     const dist = Math.abs(this.pulsePhase - 0.84);
-    const s = dist <= 0.16 ? 100 : dist <= 0.3 ? 76 : 52;
+    const s = dist <= this.sweetTol ? 100 : dist <= this.sweetTol + 0.14 ? 76 : 52;
     this.scores.push(s);
     this.tossCount++;
     this.tossAnim = 0.42;
@@ -539,7 +560,7 @@ export class WokTossMinigame implements CookingMinigame {
         ? 'Lửa bùng dậy mùi thơm chảo gang! Đỉnh của chóp! 🔥'
         : 'Hất mạnh tay thêm chút nữa theo nhịp vòng lửa nha!';
 
-    if (this.tossCount >= 3) {
+    if (this.tossCount >= this.targetTosses) {
       const avg = Math.round(this.scores.reduce((a, b) => a + b, 0) / this.scores.length);
       const grade = gradeFromScore(avg);
       this.ctx.particles.emitStarburst(cx, 240, '#4CAF50', 24);
@@ -565,7 +586,7 @@ export class WokTossMinigame implements CookingMinigame {
       return;
     }
 
-    this.pulsePhase = (this.pulsePhase + dt * 0.72) % 1;
+    this.pulsePhase = (this.pulsePhase + dt * this.shrinkSpeed) % 1;
   }
 
   render(ctx: CanvasRenderingContext2D): void {
@@ -591,7 +612,7 @@ export class WokTossMinigame implements CookingMinigame {
     ctx.stroke();
 
     const shrinkR = 128 - this.pulsePhase * 86;
-    const inSweet = Math.abs(this.pulsePhase - 0.84) <= 0.14;
+    const inSweet = Math.abs(this.pulsePhase - 0.84) <= this.sweetTol;
     ctx.beginPath();
     ctx.arc(cx, cy, shrinkR, 0, Math.PI * 2);
     ctx.strokeStyle = inSweet ? '#ffd166' : 'rgba(244, 140, 6, 0.8)';
@@ -617,7 +638,7 @@ export class WokTossMinigame implements CookingMinigame {
     // Counter
     ctx.textAlign = 'center';
     ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, `Lần hất chảo: ${this.tossCount} / 3`, cx, 140, '#ffd166');
+    drawTextShadow(ctx, `Lần hất chảo: ${this.tossCount} / ${this.targetTosses}`, cx, 140, '#ffd166');
 
     // Toss button
     const btn = this.tossBtn;
@@ -663,6 +684,9 @@ export class LayerPourMinigame implements CookingMinigame {
   private layerIdx = 0;
   private level = 0; // current fill 0..1
   private pouring = false;
+  private pourSpeed: number;
+  private perfectTol: number;
+  private goodTol: number;
   private layerScores: number[] = [];
   private filledLayers: Array<{ from: number; to: number; color: string }> = [];
   private catQuote: string;
@@ -671,23 +695,46 @@ export class LayerPourMinigame implements CookingMinigame {
 
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
+    const d = clamp(ctx.difficulty, 0, 1);
+    this.pourSpeed = lerp(0.46, 0.78, d);
+    this.perfectTol = lerp(0.08, 0.048, d);
+    this.goodTol = lerp(0.16, 0.105, d);
     this.title = `☕ ${ctx.step.action} — ${ctx.recipe.name}`;
 
+    const threeLayers = d > 0.45;
     if (ctx.recipe.id.includes('che_')) {
-      this.layers = [
-        { name: 'Đậu đỏ & Đậu xanh', color: '#b8323a', targetTop: 0.45 },
-        { name: 'Thạch lá dứa & Cốt dừa', color: '#2d9348', targetTop: 0.86 },
-      ];
+      this.layers = threeLayers
+        ? [
+            { name: 'Đậu đỏ bùi béo', color: '#b8323a', targetTop: 0.32 },
+            { name: 'Đậu xanh đánh mịn', color: '#e9c46a', targetTop: 0.62 },
+            { name: 'Thạch lá dứa & Cốt dừa', color: '#2d9348', targetTop: 0.88 },
+          ]
+        : [
+            { name: 'Đậu đỏ & Đậu xanh', color: '#b8323a', targetTop: 0.45 },
+            { name: 'Thạch lá dứa & Cốt dừa', color: '#2d9348', targetTop: 0.86 },
+          ];
     } else if (ctx.recipe.id.includes('tra_da')) {
-      this.layers = [
-        { name: 'Trà thơm vàng óng', color: '#d49a1a', targetTop: 0.55 },
-        { name: 'Đá lạnh mát rượi', color: '#90e0ef', targetTop: 0.88 },
-      ];
+      this.layers = threeLayers
+        ? [
+            { name: 'Trà mạn đậm vị', color: '#b87d14', targetTop: 0.36 },
+            { name: 'Nước trà thơm', color: '#e0a938', targetTop: 0.66 },
+            { name: 'Đá lạnh mát rượi', color: '#90e0ef', targetTop: 0.9 },
+          ]
+        : [
+            { name: 'Trà thơm vàng óng', color: '#d49a1a', targetTop: 0.55 },
+            { name: 'Đá lạnh mát rượi', color: '#90e0ef', targetTop: 0.88 },
+          ];
     } else {
-      this.layers = [
-        { name: 'Sữa đặc Ông Thọ', color: '#f7ebd2', targetTop: 0.36 },
-        { name: 'Cà phê phin đậm đà', color: '#4a2410', targetTop: 0.86 },
-      ];
+      this.layers = threeLayers
+        ? [
+            { name: 'Sữa đặc Ông Thọ', color: '#f7ebd2', targetTop: 0.28 },
+            { name: 'Cà phê phin đậm đà', color: '#4a2410', targetTop: 0.66 },
+            { name: 'Bọt kem & Đá lạnh', color: '#d8a46c', targetTop: 0.9 },
+          ]
+        : [
+            { name: 'Sữa đặc Ông Thọ', color: '#f7ebd2', targetTop: 0.36 },
+            { name: 'Cà phê phin đậm đà', color: '#4a2410', targetTop: 0.86 },
+          ];
     }
 
     this.catQuote = `Giữ nút RÓT để đổ lớp "${this.layers[0].name}" tới đúng vạch vàng rồi thả tay nha!`;
@@ -712,8 +759,8 @@ export class LayerPourMinigame implements CookingMinigame {
     const diff = Math.abs(this.level - layer.targetTop);
 
     const score =
-      diff <= 0.065 ? 100
-      : diff <= 0.14 ? 78
+      diff <= this.perfectTol ? 100
+      : diff <= this.goodTol ? 78
       : 50;
 
     this.filledLayers.push({ from: prevTop, to: this.level, color: layer.color });
@@ -757,7 +804,7 @@ export class LayerPourMinigame implements CookingMinigame {
     }
 
     if (this.pouring) {
-      this.level = Math.min(1, this.level + 0.56 * dt);
+      this.level = Math.min(1, this.level + this.pourSpeed * dt);
       const activeLayer = this.layers[this.layerIdx];
       if (activeLayer && Math.random() < dt * 24) {
         const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
