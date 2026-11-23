@@ -12,6 +12,7 @@ interface TransitionState {
   duration: number;        // seconds
   fromScene: Scene | null;
   toScene: Scene;
+  entered: boolean;
 }
 
 export class SceneManager {
@@ -19,12 +20,12 @@ export class SceneManager {
   private transition: TransitionState | null = null;
 
   get current(): Scene | null {
-    if (this.transition) return null; // during transition, we render manually
     return this.stack[this.stack.length - 1] ?? null;
   }
 
   /** Replace current scene */
-  replace(scene: Scene, transition: TransitionType = 'fade', duration = 0.3): void {
+  replace(scene: Scene, transition: TransitionType = 'fade', duration = 0.25): void {
+    this.finishPendingTransition();
     const from = this.stack.pop() ?? null;
     this.stack.push(scene);
 
@@ -34,17 +35,22 @@ export class SceneManager {
       return;
     }
 
+    // Detach old scene's input listeners immediately so clicks don't double-fire during fade
+    from.exit();
+
     this.transition = {
       type: transition,
       progress: 0,
       duration,
       fromScene: from,
       toScene: scene,
+      entered: false,
     };
   }
 
   /** Push scene on top (e.g., pause overlay) */
-  push(scene: Scene, transition: TransitionType = 'fade', duration = 0.3): void {
+  push(scene: Scene, transition: TransitionType = 'fade', duration = 0.25): void {
+    this.finishPendingTransition();
     const from = this.stack[this.stack.length - 1] ?? null;
     this.stack.push(scene);
 
@@ -59,17 +65,21 @@ export class SceneManager {
       duration,
       fromScene: from,
       toScene: scene,
+      entered: false,
     };
   }
 
   /** Pop top scene */
-  pop(transition: TransitionType = 'fade', duration = 0.3): void {
+  pop(transition: TransitionType = 'fade', duration = 0.25): void {
+    this.finishPendingTransition();
     if (this.stack.length <= 1) return;
     const from = this.stack.pop()!;
     const to = this.stack[this.stack.length - 1];
 
+    from.exit();
+
     if (transition === 'none') {
-      from.exit();
+      to.enter();
       return;
     }
 
@@ -79,6 +89,7 @@ export class SceneManager {
       duration,
       fromScene: from,
       toScene: to,
+      entered: false,
     };
   }
 
@@ -86,9 +97,18 @@ export class SceneManager {
   update(dt: number): void {
     if (this.transition) {
       this.transition.progress += dt / this.transition.duration;
-      if (this.transition.progress >= 1) {
-        this.transition.fromScene?.exit();
+
+      // Initialize the incoming scene at the midpoint BEFORE it is rendered
+      if (this.transition.progress >= 0.5 && !this.transition.entered) {
+        this.transition.entered = true;
         this.transition.toScene.enter();
+      }
+
+      if (this.transition.progress >= 1) {
+        if (!this.transition.entered) {
+          this.transition.entered = true;
+          this.transition.toScene.enter();
+        }
         this.transition = null;
       }
       return;
@@ -105,24 +125,34 @@ export class SceneManager {
     this.current?.render(ctx);
   }
 
+  private finishPendingTransition(): void {
+    if (this.transition && !this.transition.entered) {
+      this.transition.entered = true;
+      this.transition.toScene.enter();
+    }
+    this.transition = null;
+  }
+
   private renderTransition(ctx: CanvasRenderingContext2D): void {
     const t = this.transition!;
-    const { width, height } = ctx.canvas;
-    const gw = width / (window.devicePixelRatio ?? 1);
-    const gh = height / (window.devicePixelRatio ?? 1);
 
-    if (t.type === 'fade') {
-      if (t.progress < 0.5) {
-        // First half: render old scene fading out
-        t.fromScene?.render(ctx);
-        ctx.fillStyle = `rgba(26, 26, 46, ${t.progress * 2})`;
-        ctx.fillRect(0, 0, 960, 540);
-      } else {
-        // Second half: render new scene fading in
-        t.toScene.render(ctx);
-        ctx.fillStyle = `rgba(26, 26, 46, ${(1 - t.progress) * 2})`;
-        ctx.fillRect(0, 0, 960, 540);
+    if (t.progress < 0.5) {
+      // First half: render old scene fading out
+      t.fromScene?.render(ctx);
+      const alpha = Math.min(1, t.progress * 2);
+      ctx.fillStyle = `rgba(26, 26, 46, ${alpha})`;
+      ctx.fillRect(0, 0, 960, 540);
+    } else {
+      // Ensure incoming scene has entered before first render
+      if (!t.entered) {
+        t.entered = true;
+        t.toScene.enter();
       }
+      // Second half: render new scene fading in
+      t.toScene.render(ctx);
+      const alpha = Math.max(0, (1 - t.progress) * 2);
+      ctx.fillStyle = `rgba(26, 26, 46, ${alpha})`;
+      ctx.fillRect(0, 0, 960, 540);
     }
   }
 }

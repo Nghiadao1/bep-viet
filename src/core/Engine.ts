@@ -102,13 +102,13 @@ export class Engine {
     this.lastTime = now;
 
     // Update
-    this.scenes.current?.update(dt);
+    this.scenes.update(dt);
 
     // Render
     this.ctx.save();
     this.ctx.scale(this.scale, this.scale);
     this.ctx.clearRect(0, 0, this.gameWidth, this.gameHeight);
-    this.scenes.current?.render(this.ctx);
+    this.scenes.render(this.ctx);
     this.ctx.restore();
 
     this.rafId = requestAnimationFrame(this.loop);

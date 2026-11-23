@@ -11,6 +11,7 @@ import { formatMoney, formatTime, clamp, randFloat, randInt, randPick } from '..
 import { RECIPES, getRecipe } from '../data/recipes';
 import { getLevel } from '../data/levels';
 import { ResultScene } from './ResultScene';
+import { MapScene } from './MapScene';
 
 // ---- Inline entity types (self-contained vertical slice) ----
 
@@ -105,6 +106,9 @@ export class GameScene implements Scene {
   // UI rects
   private recipeCards: { recipe: Recipe; rect: Rect }[] = [];
   private pauseBtn: Rect = { x: 900, y: 10, width: 44, height: 36 };
+  private cancelDishBtn: Rect = { x: 862, y: 360, width: 70, height: 28 };
+  private resumeBtn: Rect = { x: 350, y: 295, width: 120, height: 42 };
+  private exitMapBtn: Rect = { x: 490, y: 295, width: 120, height: 42 };
 
   // Input
   private removeClick?: () => void;
@@ -156,7 +160,7 @@ export class GameScene implements Scene {
     this.activeDish = null;
     this.customers = [];
     this.nextCustomerId = 0;
-    this.spawnTimer = 2000; // first spawn after 2s
+    this.spawnTimer = 500; // first spawn shortly after starting
 
     // Resolve available recipes
     this.recipes = [];
@@ -178,12 +182,12 @@ export class GameScene implements Scene {
       }
     }
 
-    // Create stations
+    // Create stations (dynamically sized to fit within 920px)
     this.stations = [];
     const typesArr = Array.from(neededTypes);
-    const stationW = 100;
+    const stationGap = typesArr.length > 7 ? 8 : 16;
+    const stationW = Math.min(100, Math.floor((920 - (typesArr.length - 1) * stationGap) / Math.max(1, typesArr.length)));
     const stationH = 110;
-    const stationGap = 16;
     const totalW = typesArr.length * stationW + (typesArr.length - 1) * stationGap;
     const startX = (960 - totalW) / 2;
 
@@ -204,11 +208,11 @@ export class GameScene implements Scene {
       });
     }
 
-    // Build recipe cards
+    // Build recipe cards (dynamically sized to fit within 920px)
     this.recipeCards = [];
-    const cardW = 140;
+    const cardGap = this.recipes.length > 5 ? 10 : 16;
+    const cardW = Math.min(140, Math.floor((920 - (this.recipes.length - 1) * cardGap) / Math.max(1, this.recipes.length)));
     const cardH = 100;
-    const cardGap = 16;
     const totalCardW = this.recipes.length * cardW + (this.recipes.length - 1) * cardGap;
     const cardStartX = (960 - totalCardW) / 2;
 
@@ -234,7 +238,29 @@ export class GameScene implements Scene {
         return;
       }
 
-      if (this.paused) return;
+      if (this.paused) {
+        if (InputManager.hitTest(pos, this.resumeBtn)) {
+          this.paused = false;
+          return;
+        }
+        if (InputManager.hitTest(pos, this.exitMapBtn)) {
+          this.engine.scenes.replace(new MapScene(this.engine));
+          return;
+        }
+        return;
+      }
+
+      // Cancel active dish button
+      if (this.activeDish && InputManager.hitTest(pos, this.cancelDishBtn)) {
+        for (const st of this.stations) {
+          st.state = 'idle';
+          st.cookTimer = 0;
+          st.currentStep = null;
+        }
+        this.activeDish = null;
+        this.showFeedback('🗑 Đã hủy món', '#FCA311');
+        return;
+      }
 
       // Click recipe card → start new dish
       if (!this.activeDish) {
@@ -273,6 +299,13 @@ export class GameScene implements Scene {
       completed: false,
     };
     this.showFeedback(`🍳 ${recipe.name} — Bước 1: ${recipe.steps[0].action}`, '#FCA311');
+    for (let i = 0; i < this.stations.length; i++) {
+      if (this.stations[i].type === recipe.steps[0].stationType) {
+        this.stationFlashIndex = i;
+        this.stationFlashTimer = 1.5;
+        break;
+      }
+    }
   }
 
   private handleStationClick(stationIndex: number): void {
@@ -365,12 +398,13 @@ export class GameScene implements Scene {
     this.activeDish = null;
   }
 
-  private spawnCustomer(): void {
-    if (this.customers.filter((c) => !c.leaving).length >= this.levelConfig.maxCustomers) return;
-    if (this.recipes.length === 0) return;
+  private spawnCustomer(): boolean {
+    if (this.customers.filter((c) => !c.leaving).length >= this.levelConfig.maxCustomers) return false;
+    if (this.recipes.length === 0) return false;
 
     const recipe = randPick(this.recipes);
     const slot = this.getNextCustomerSlot();
+    const patience = randFloat(22, 32);
 
     const customer: InlineCustomer = {
       id: this.nextCustomerId++,
@@ -379,23 +413,30 @@ export class GameScene implements Scene {
       y: slot.y,
       width: 70,
       height: 90,
-      patience: randFloat(15, 25),
-      maxPatience: randFloat(15, 25),
+      patience,
+      maxPatience: patience,
       order: recipe,
       mood: CustomerMood.HAPPY,
       served: false,
       leaving: false,
       orderBubbleAlpha: 0,
     };
-    customer.maxPatience = customer.patience;
 
     this.customers.push(customer);
+    return true;
   }
 
   private getNextCustomerSlot(): { x: number; y: number } {
-    const activeCustomers = this.customers.filter((c) => !c.leaving);
-    const slotX = 80 + activeCustomers.length * 150;
-    return { x: clamp(slotX, 80, 800), y: 80 };
+    const slots = [80, 240, 400, 560, 720];
+    const occupied = new Set(
+      this.customers.filter((c) => !c.leaving).map((c) => c.targetX),
+    );
+    for (const sx of slots) {
+      if (!occupied.has(sx)) {
+        return { x: sx, y: 80 };
+      }
+    }
+    return { x: clamp(80 + occupied.size * 150, 80, 760), y: 80 };
   }
 
   private showFeedback(text: string, color: string): void {
@@ -418,8 +459,8 @@ export class GameScene implements Scene {
     // Spawn customers
     this.spawnTimer -= dt * 1000;
     if (this.spawnTimer <= 0) {
-      this.spawnCustomer();
-      this.spawnTimer = this.levelConfig.customerSpawnRate;
+      const spawned = this.spawnCustomer();
+      this.spawnTimer = spawned ? this.levelConfig.customerSpawnRate : 1000;
     }
 
     // Update stations
@@ -472,8 +513,10 @@ export class GameScene implements Scene {
         continue;
       }
 
-      // Patience
-      c.patience -= dt;
+      // Only start patience countdown once customer arrives at counter
+      if (c.x <= c.targetX) {
+        c.patience -= dt;
+      }
       const ratio = c.patience / c.maxPatience;
       if (ratio > 0.5) c.mood = CustomerMood.HAPPY;
       else if (ratio > 0.2) c.mood = CustomerMood.NEUTRAL;
@@ -581,14 +624,25 @@ export class GameScene implements Scene {
 
     // --- Pause overlay ---
     if (this.paused) {
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillStyle = 'rgba(0,0,0,0.65)';
       ctx.fillRect(0, 0, W, H);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.font = 'bold 48px "Segoe UI", system-ui, sans-serif';
-      drawTextShadow(ctx, '⏸ TẠM DỪNG', W / 2, H / 2 - 20, '#FCA311');
-      ctx.font = '20px "Segoe UI", system-ui, sans-serif';
-      drawTextShadow(ctx, 'Nhấn ⏸ để tiếp tục', W / 2, H / 2 + 30, '#aaa');
+      drawTextShadow(ctx, '⏸ TẠM DỪNG', W / 2, H / 2 - 40, '#FCA311');
+
+      // Resume button
+      roundRect(ctx, this.resumeBtn.x, this.resumeBtn.y, this.resumeBtn.width, this.resumeBtn.height, 10);
+      ctx.fillStyle = '#4CAF50';
+      ctx.fill();
+      ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, '▶ Tiếp tục', this.resumeBtn.x + this.resumeBtn.width / 2, this.resumeBtn.y + this.resumeBtn.height / 2);
+
+      // Back to map button
+      roundRect(ctx, this.exitMapBtn.x, this.exitMapBtn.y, this.exitMapBtn.width, this.exitMapBtn.height, 10);
+      ctx.fillStyle = '#E63946';
+      ctx.fill();
+      drawTextShadow(ctx, '🗺 Bản đồ', this.exitMapBtn.x + this.exitMapBtn.width / 2, this.exitMapBtn.y + this.exitMapBtn.height / 2);
     }
   }
 
@@ -880,11 +934,21 @@ export class GameScene implements Scene {
       drawTextShadow(
         ctx,
         `→ ${step.action} (${STATION_LABELS[step.stationType]})`,
-        W - 32,
+        this.cancelDishBtn.x - 12,
         y + 22,
         '#FCA311',
       );
     }
+
+    // Cancel dish button
+    roundRect(ctx, this.cancelDishBtn.x, this.cancelDishBtn.y, this.cancelDishBtn.width, this.cancelDishBtn.height, 6);
+    ctx.fillStyle = 'rgba(230, 57, 70, 0.8)';
+    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#fff';
+    ctx.fillText('🗑 Hủy', this.cancelDishBtn.x + this.cancelDishBtn.width / 2, this.cancelDishBtn.y + this.cancelDishBtn.height / 2);
   }
 
   private renderRecipeCards(ctx: CanvasRenderingContext2D): void {
