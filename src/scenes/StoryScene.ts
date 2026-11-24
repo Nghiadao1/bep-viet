@@ -34,6 +34,8 @@ export class StoryScene implements Scene {
 
   enter(): void {
     this.engine.input.clear();
+    this.engine.audio.playBgm('menu');
+    this.engine.audio.playSfx('meow');
     this.lineIndex = 0;
     this.elapsed = 0;
     this.lineElapsed = 0;
@@ -41,6 +43,7 @@ export class StoryScene implements Scene {
     this.removeClick = this.engine.input.onClick((pos) => {
       // Skip cutscene
       if (InputManager.hitTest(pos, this.skipBtn, 8)) {
+        this.engine.audio.playSfx('click');
         this.onComplete();
         return;
       }
@@ -55,13 +58,16 @@ export class StoryScene implements Scene {
       const shownChars = Math.floor(this.lineElapsed * 55);
       if (shownChars < line.text.length) {
         this.lineElapsed = 20;
+        this.engine.audio.playSfx('click');
         return;
       }
 
       if (this.lineIndex < this.story.lines.length - 1) {
         this.lineIndex++;
         this.lineElapsed = 0;
+        this.engine.audio.playSfx('pop');
       } else {
+        this.engine.audio.playSfx('click');
         this.onComplete();
       }
     });
@@ -149,10 +155,6 @@ export class StoryScene implements Scene {
       const drawW = (img.width / img.height) * drawH;
       const x = 96;
       const y = this.boxRect.y - drawH + 28 + (active ? bobA : 0);
-      if (active) {
-        ctx.shadowColor = 'rgba(252, 163, 17, 0.55)';
-        ctx.shadowBlur = 24;
-      }
       ctx.drawImage(img, x, y, drawW, drawH);
       ctx.restore();
     }
@@ -172,10 +174,6 @@ export class StoryScene implements Scene {
         const drawW = (img.width / img.height) * drawH;
         const x = W - drawW - 96;
         const y = this.boxRect.y - drawH + 28 + (active ? bobB : 0);
-        if (active) {
-          ctx.shadowColor = 'rgba(244, 162, 97, 0.6)';
-          ctx.shadowBlur = 24;
-        }
         ctx.drawImage(img, x, y, drawW, drawH);
         ctx.restore();
       }

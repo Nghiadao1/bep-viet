@@ -552,6 +552,7 @@ export class WokTossMinigame implements CookingMinigame {
     this.pulsePhase = 0;
     this.targetPhase = randFloat(0.55, 0.88); // Fresh new ring size for next toss!
 
+    this.ctx.engine.audio.playSfx(s >= 85 ? 'fire' : 'pop');
     this.ctx.particles.emitFireSparks(cx, 286, 18);
     this.ctx.particles.shake(4, 0.14);
     if (s >= 85) {
@@ -780,6 +781,7 @@ export class LayerPourMinigame implements CookingMinigame {
 
     const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
     const liquidY = 154 + 190 * (1 - this.level);
+    this.ctx.engine.audio.playSfx(score >= 85 ? 'splash' : 'pop');
     if (score >= 85) {
       this.ctx.particles.emitStarburst(cx, liquidY, '#ffd166', 14);
     }

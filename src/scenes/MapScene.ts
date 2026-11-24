@@ -163,9 +163,10 @@ export class MapScene implements Scene {
   private shopBtn: Rect = { x: 644, y: 12, width: 158, height: 42 };
   private tutorialBtn: Rect = { x: 810, y: 12, width: 132, height: 42 };
 
-  // Cached projected polygons
+  // Cached projected polygons + offscreen static map canvas (huge mobile FPS win!)
   private mainlandPts: Vec2[] = [];
   private phuQuocPts: Vec2[] = [];
+  private staticMapCanvas: HTMLCanvasElement | null = null;
 
   private removeClick?: () => void;
 
@@ -177,7 +178,9 @@ export class MapScene implements Scene {
 
   enter(): void {
     this.engine.input.clear();
+    this.engine.audio.playBgm('menu');
     this.elapsed = 0;
+    this.buildStaticMapCache();
 
     // Default to the player's current active chapter
     const curLv = this.engine.save.current.currentLevel;
@@ -198,12 +201,14 @@ export class MapScene implements Scene {
     this.removeClick = this.engine.input.onClick((pos) => {
       // Back to Menu
       if (InputManager.hitTest(pos, this.backBtn, 6)) {
+        this.engine.audio.playSfx('click');
         this.engine.scenes.replace(new MenuScene(this.engine));
         return;
       }
 
       // Quick-play Emergency Market Runner (Subway Surfers dash)!
       if (InputManager.hitTest(pos, this.marketBtn, 6)) {
+        this.engine.audio.playSfx('click');
         this.engine.scenes.replace(
           new MarketRunnerScene(this.engine, (bonusStock) => {
             const cur = this.engine.save.current.currentLevel;
@@ -215,6 +220,7 @@ export class MapScene implements Scene {
 
       // Quick-play Gangster Cat Defense (Rock-Paper-Scissors brawl)!
       if (InputManager.hitTest(pos, this.gangsterBtn, 6)) {
+        this.engine.audio.playSfx('punch');
         this.engine.scenes.replace(
           new GangsterBattleScene(this.engine, () => {
             this.engine.scenes.replace(new MapScene(this.engine));
@@ -225,18 +231,21 @@ export class MapScene implements Scene {
 
       // Open Upgrade Shop!
       if (InputManager.hitTest(pos, this.shopBtn, 6)) {
+        this.engine.audio.playSfx('click');
         this.engine.scenes.replace(new ShopScene(this.engine, 'map'));
         return;
       }
 
       // Replay tutorial in Level 1
       if (InputManager.hitTest(pos, this.tutorialBtn, 6)) {
+        this.engine.audio.playSfx('meow');
         this.engine.scenes.replace(new GameScene(this.engine, 1, true));
         return;
       }
 
       // Watch selected chapter's Visual-Novel Story Cutscene!
       if (InputManager.hitTest(pos, this.storyBtn, 6)) {
+        this.engine.audio.playSfx('click');
         const chapter = CHAPTERS[this.selectedChapterIdx];
         this.engine.scenes.replace(
           new StoryScene(this.engine, chapter.id, () => {
@@ -249,6 +258,7 @@ export class MapScene implements Scene {
       // Click a city pin on the Vietnam Map
       for (const pin of this.pinHitRects) {
         if (InputManager.hitTest(pos, pin.rect, 6)) {
+          this.engine.audio.playSfx('pop');
           this.selectedChapterIdx = pin.chapterIdx;
           return;
         }
@@ -262,6 +272,7 @@ export class MapScene implements Scene {
         if (InputManager.hitTest(pos, this.levelRects[i], 6)) {
           const level = levels[i];
           if (level && level.id <= save.currentLevel) {
+            this.engine.audio.playSfx('click');
             const seen = save.seenChapters ?? [];
             // Auto-play Chapter Opening Story Cutscene on first entry into any region!
             if (i === 0 && !seen.includes(chapter.id)) {
@@ -274,6 +285,8 @@ export class MapScene implements Scene {
             } else {
               this.engine.scenes.replace(new GameScene(this.engine, level.id));
             }
+          } else {
+            this.engine.audio.playSfx('error');
           }
           return;
         }
@@ -392,12 +405,16 @@ export class MapScene implements Scene {
     );
   }
 
-  private renderVietnamMap(ctx: CanvasRenderingContext2D): void {
+  /** Pre-render static Vietnam ocean, grid, 45-point coastline, islands & compass ONCE for silky 60fps on mobile! */
+  private buildStaticMapCache(): void {
+    if (this.staticMapCanvas) return;
     const mapRect: Rect = { x: 20, y: 64, width: 472, height: 460 };
+    const off = document.createElement('canvas');
+    off.width = 500;
+    off.height = 532;
+    const ctx = off.getContext('2d');
+    if (!ctx) return;
 
-    ctx.save();
-
-    // Clip to ocean map frame
     roundRect(ctx, mapRect.x, mapRect.y, mapRect.width, mapRect.height, 16);
     const seaGrad = ctx.createLinearGradient(mapRect.x, mapRect.y, mapRect.x + mapRect.width, mapRect.y + mapRect.height);
     seaGrad.addColorStop(0, '#0b324d');
@@ -410,7 +427,7 @@ export class MapScene implements Scene {
     roundRect(ctx, mapRect.x, mapRect.y, mapRect.width, mapRect.height, 16);
     ctx.clip();
 
-    // Subtle vintage latitude / longitude grid lines
+    // Vintage latitude / longitude grid lines
     ctx.strokeStyle = 'rgba(144, 224, 239, 0.08)';
     ctx.lineWidth = 1;
     for (let x = mapRect.x + 40; x < mapRect.x + mapRect.width; x += 52) {
@@ -426,21 +443,6 @@ export class MapScene implements Scene {
       ctx.stroke();
     }
 
-    // Stylized ocean waves in Biển Đông
-    ctx.strokeStyle = 'rgba(144, 224, 239, 0.14)';
-    ctx.lineWidth = 1.5;
-    const waveSpots = [
-      [330, 210], [395, 225], [320, 340], [415, 360], [315, 420], [82, 345], [88, 410],
-    ];
-    for (let i = 0; i < waveSpots.length; i++) {
-      const [wx, wy] = waveSpots[i];
-      const shift = Math.sin(this.elapsed * 1.4 + i) * 3;
-      ctx.beginPath();
-      ctx.arc(wx + shift, wy, 7, Math.PI * 1.15, Math.PI * 1.85);
-      ctx.arc(wx + 12 + shift, wy, 7, Math.PI * 1.15, Math.PI * 1.85);
-      ctx.stroke();
-    }
-
     // "BIỂN ĐÔNG" nautical label
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -448,31 +450,28 @@ export class MapScene implements Scene {
     ctx.fillStyle = 'rgba(144, 224, 239, 0.25)';
     ctx.fillText('B I Ể N   Đ Ô N G', 384, 345);
 
-    // Subtle neighboring sea shadow + Mainland Vietnam S-shape!
+    // Zero-blur drop offset shadow + Mainland Vietnam S-shape
     ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-    ctx.shadowBlur = 14;
-    ctx.shadowOffsetX = 4;
-    ctx.shadowOffsetY = 5;
-
-    const landGrad = ctx.createLinearGradient(120, 80, 260, 500);
-    landGrad.addColorStop(0, '#2a8f58');   // Northern lush highlands
-    landGrad.addColorStop(0.45, '#3aa366'); // Central jade coast
-    landGrad.addColorStop(1, '#52b768');   // Southern Mekong delta
-
+    ctx.translate(4, 5);
     this.tracePolygon(ctx, this.mainlandPts);
-    ctx.fillStyle = landGrad;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.fill();
     ctx.restore();
 
-    // Inner highland texture tint & crisp golden border along Vietnam's S-coastline
+    const landGrad = ctx.createLinearGradient(120, 80, 260, 500);
+    landGrad.addColorStop(0, '#2a8f58');
+    landGrad.addColorStop(0.45, '#3aa366');
+    landGrad.addColorStop(1, '#52b768');
     this.tracePolygon(ctx, this.mainlandPts);
+    ctx.fillStyle = landGrad;
+    ctx.fill();
+
     ctx.strokeStyle = '#f4d35e';
     ctx.lineWidth = 2.2;
     ctx.lineJoin = 'round';
     ctx.stroke();
 
-    // Đảo Phú Quốc (Southwest)
+    // Đảo Phú Quốc
     this.tracePolygon(ctx, this.phuQuocPts);
     ctx.fillStyle = '#40916c';
     ctx.fill();
@@ -495,7 +494,7 @@ export class MapScene implements Scene {
     ctx.lineWidth = 1;
     ctx.stroke();
 
-    // Quần đảo Hoàng Sa (Paracel Islands) — respectfully charted in Biển Đông
+    // Quần đảo Hoàng Sa & Trường Sa
     this.renderArchipelago(
       ctx,
       368,
@@ -503,8 +502,6 @@ export class MapScene implements Scene {
       [[-10, -4], [0, -7], [11, -2], [-5, 6], [6, 5], [16, 4]],
       'Quần đảo Hoàng Sa',
     );
-
-    // Quần đảo Trường Sa (Spratly Islands) — respectfully charted in Biển Đông
     this.renderArchipelago(
       ctx,
       392,
@@ -513,8 +510,37 @@ export class MapScene implements Scene {
       'Quần đảo Trường Sa',
     );
 
-    // Vintage Compass Rose (bottom-left corner of map)
     this.renderCompass(ctx, 64, 480);
+    ctx.restore();
+    this.staticMapCanvas = off;
+  }
+
+  private renderVietnamMap(ctx: CanvasRenderingContext2D): void {
+    const mapRect: Rect = { x: 20, y: 64, width: 472, height: 460 };
+
+    ctx.save();
+    if (this.staticMapCanvas) {
+      ctx.drawImage(this.staticMapCanvas, 0, 0);
+    }
+
+    ctx.save();
+    roundRect(ctx, mapRect.x, mapRect.y, mapRect.width, mapRect.height, 16);
+    ctx.clip();
+
+    // Animated ocean ripples (lightweight overlay on top of cached map!)
+    ctx.strokeStyle = 'rgba(144, 224, 239, 0.14)';
+    ctx.lineWidth = 1.5;
+    const waveSpots = [
+      [330, 210], [395, 225], [320, 340], [415, 360], [315, 420], [82, 345], [88, 410],
+    ];
+    for (let i = 0; i < waveSpots.length; i++) {
+      const [wx, wy] = waveSpots[i];
+      const shift = Math.sin(this.elapsed * 1.4 + i) * 3;
+      ctx.beginPath();
+      ctx.arc(wx + shift, wy, 7, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.arc(wx + 12 + shift, wy, 7, Math.PI * 1.15, Math.PI * 1.85);
+      ctx.stroke();
+    }
 
     // Animated golden dotted journey trail: Ch.1 -> Ch.2 -> Ch.3 -> Ch.4 -> Ch.5
     const journeyOrder = [1, 2, 3, 4, 5];

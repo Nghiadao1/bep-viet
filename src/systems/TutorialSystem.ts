@@ -257,10 +257,6 @@ export class TutorialSystem {
       const x = 92;
       const y = this.modalBoxRect.y - drawH + 26 + (active ? bobA : 0);
 
-      if (active) {
-        ctx.shadowColor = 'rgba(252, 163, 17, 0.55)';
-        ctx.shadowBlur = 22;
-      }
       ctx.drawImage(img, x, y, drawW, drawH);
       ctx.restore();
     }
@@ -278,10 +274,6 @@ export class TutorialSystem {
         const x = W - drawW - 96;
         const y = this.modalBoxRect.y - drawH + 26 + (active ? bobB : 0);
 
-        if (active) {
-          ctx.shadowColor = 'rgba(244, 162, 97, 0.6)';
-          ctx.shadowBlur = 22;
-        }
         ctx.drawImage(img, x, y, drawW, drawH);
         ctx.restore();
       }
@@ -393,8 +385,6 @@ export class TutorialSystem {
       roundRect(ctx, r.x - pad, r.y - pad, r.width + pad * 2, r.height + pad * 2, 14);
       ctx.strokeStyle = `rgba(255, 209, 102, ${pulse})`;
       ctx.lineWidth = 4;
-      ctx.shadowColor = '#FCA311';
-      ctx.shadowBlur = 16;
       ctx.stroke();
       ctx.restore();
 
@@ -403,10 +393,7 @@ export class TutorialSystem {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.font = '32px "Segoe UI"';
-      ctx.shadowColor = 'rgba(0,0,0,0.7)';
-      ctx.shadowBlur = 6;
       ctx.fillText('👇', r.x + r.width / 2, r.y - 22 + bob);
-      ctx.shadowBlur = 0;
     }
 
     // Floating Cat NPC Guide Card at upper-right (leaves left customer & counter totally clear!)

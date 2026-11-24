@@ -5,6 +5,7 @@
 // ============================================================
 
 import { randFloat, randPick } from '../utils/math';
+import { isTouchDevice } from '../utils/mobile';
 
 export type ParticleKind =
   | 'circle'
@@ -36,7 +37,13 @@ interface Particle {
   targetY?: number;
 }
 
-const MAX_PARTICLES = 420;
+const IS_MOBILE = typeof window !== 'undefined' && isTouchDevice();
+const MAX_PARTICLES = IS_MOBILE ? 110 : 300;
+const COUNT_SCALE = IS_MOBILE ? 0.55 : 1;
+
+function scaledCount(n: number): number {
+  return Math.max(1, Math.round(n * COUNT_SCALE));
+}
 
 export class ParticleSystem {
   private particles: Particle[] = [];
@@ -122,7 +129,8 @@ export class ParticleSystem {
 
   /** Bursting orange & yellow stove/charcoal fire sparks */
   emitFireSparks(x: number, y: number, count = 12): void {
-    for (let i = 0; i < count; i++) {
+    const n = scaledCount(count);
+    for (let i = 0; i < n; i++) {
       const angle = randFloat(-Math.PI * 0.9, -Math.PI * 0.1);
       const speed = randFloat(60, 190);
       this.push({
@@ -147,7 +155,8 @@ export class ParticleSystem {
 
   /** Gleaming blade sparks + juicy specks along a knife slice or cut */
   emitSliceSparks(x: number, y: number, accentColor = '#fff3b0', count = 10): void {
-    for (let i = 0; i < count; i++) {
+    const n = scaledCount(count);
+    for (let i = 0; i < n; i++) {
       const angle = randFloat(0, Math.PI * 2);
       const speed = randFloat(50, 165);
       this.push({
@@ -172,7 +181,8 @@ export class ParticleSystem {
 
   /** Fresh green sparkle burst when picking herbs */
   emitLeafBurst(x: number, y: number): void {
-    for (let i = 0; i < 12; i++) {
+    const n = scaledCount(12);
+    for (let i = 0; i < n; i++) {
       const angle = randFloat(0, Math.PI * 2);
       const speed = randFloat(45, 135);
       this.push({
@@ -197,7 +207,8 @@ export class ParticleSystem {
 
   /** Colorful seasoning flecks raining into a bowl */
   emitSpiceRain(x: number, y: number, color: string): void {
-    for (let i = 0; i < 14; i++) {
+    const n = scaledCount(14);
+    for (let i = 0; i < n; i++) {
       this.push({
         kind: i % 4 === 0 ? 'star' : 'circle',
         x: x + randFloat(-32, 32),
@@ -263,8 +274,9 @@ export class ParticleSystem {
     });
 
     const palette = [color, '#fff3b0', '#ffffff', '#4CAF50', '#f48c06'];
-    for (let i = 0; i < count; i++) {
-      const angle = (i / count) * Math.PI * 2 + randFloat(-0.15, 0.15);
+    const n = scaledCount(count);
+    for (let i = 0; i < n; i++) {
+      const angle = (i / n) * Math.PI * 2 + randFloat(-0.15, 0.15);
       const speed = randFloat(75, 220);
       this.push({
         kind: i % 2 === 0 ? 'star' : 'confetti',
@@ -404,33 +416,45 @@ export class ParticleSystem {
     if (this.particles.length === 0) return;
 
     ctx.save();
-    for (const p of this.particles) {
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
       if (p.life < 0) continue;
       const t = Math.min(1, p.life / p.maxLife);
       const curSize = p.size + (p.endSize - p.size) * t;
       const curAlpha = p.alpha * (p.kind === 'text' ? (t < 0.7 ? 1 : (1 - t) / 0.3) : 1 - t);
       if (curAlpha <= 0.01) continue;
 
-      ctx.save();
       ctx.globalAlpha = curAlpha;
 
+      // Fast path without ctx.save()/restore() for simple circles, smoke & rings (5x faster on mobile!)
+      if (p.kind === 'circle' || p.kind === 'smoke') {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, Math.max(0.5, curSize), 0, Math.PI * 2);
+        ctx.fillStyle = p.color;
+        ctx.fill();
+        continue;
+      }
+      if (p.kind === 'ring') {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, curSize, 0, Math.PI * 2);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(1, 5 * (1 - t));
+        ctx.stroke();
+        continue;
+      }
+      if (p.kind === 'text') {
+        ctx.font = `bold ${Math.round(curSize)}px "Segoe UI", system-ui, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = 'rgba(0,0,0,0.65)';
+        ctx.fillText(p.text ?? '', p.x, p.y + 2);
+        ctx.fillStyle = p.color;
+        ctx.fillText(p.text ?? '', p.x, p.y);
+        continue;
+      }
+
+      ctx.save();
       switch (p.kind) {
-        case 'circle':
-        case 'smoke': {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, Math.max(0.5, curSize), 0, Math.PI * 2);
-          ctx.fillStyle = p.color;
-          ctx.fill();
-          break;
-        }
-        case 'ring': {
-          ctx.beginPath();
-          ctx.arc(p.x, p.y, curSize, 0, Math.PI * 2);
-          ctx.strokeStyle = p.color;
-          ctx.lineWidth = Math.max(1, 5 * (1 - t));
-          ctx.stroke();
-          break;
-        }
         case 'star': {
           ctx.translate(p.x, p.y);
           ctx.rotate(p.rotation);
@@ -462,18 +486,7 @@ export class ParticleSystem {
           ctx.fillText('₫', 0, 0.5);
           break;
         }
-        case 'text': {
-          ctx.font = `bold ${Math.round(curSize)}px "Segoe UI", system-ui, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = 'rgba(0,0,0,0.65)';
-          ctx.fillText(p.text ?? '', p.x, p.y + 2);
-          ctx.fillStyle = p.color;
-          ctx.fillText(p.text ?? '', p.x, p.y);
-          break;
-        }
       }
-
       ctx.restore();
     }
     ctx.restore();

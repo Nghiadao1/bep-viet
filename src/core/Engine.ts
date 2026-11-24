@@ -10,6 +10,7 @@ import { SaveManager } from './SaveManager';
 import { calculateCanvasSize } from '../utils/responsive';
 import {
   getViewportSize,
+  isTouchDevice,
   shouldPromptLandscape,
   requestLandscapeFullscreen,
 } from '../utils/mobile';
@@ -45,7 +46,8 @@ export class Engine {
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
-    const ctx = canvas.getContext('2d');
+    // alpha: false avoids full-screen canvas-to-DOM alpha compositing on mobile GPUs!
+    const ctx = canvas.getContext('2d', { alpha: false });
     if (!ctx) throw new Error('Canvas 2D not supported');
     this.ctx = ctx;
 
@@ -55,15 +57,24 @@ export class Engine {
     this.audio = new AudioManager();
     this.save = new SaveManager();
 
+    // Unlock Web Audio automatically on first touch / click / keystroke (iOS & Android Safari/Chrome)
+    const unlockAudio = () => this.audio.unlock();
+    window.addEventListener('touchstart', unlockAudio, { passive: true });
+    window.addEventListener('mousedown', unlockAudio, { passive: true });
+    window.addEventListener('keydown', unlockAudio, { passive: true });
+
     // Crisp tap ripple feedback for every touch/click
     this.input.onTapVisual((pos) => {
-      this.ripples.push({ x: pos.x, y: pos.y, radius: 6, alpha: 0.7 });
+      if (this.ripples.length < 6) {
+        this.ripples.push({ x: pos.x, y: pos.y, radius: 6, alpha: 0.7 });
+      }
     });
 
     // Wire fullscreen + landscape lock button in rotate overlay
     const fsBtn = document.getElementById('rotate-fullscreen-btn');
     if (fsBtn) {
       fsBtn.addEventListener('click', () => {
+        this.audio.unlock();
         void requestLandscapeFullscreen().then(() => {
           setTimeout(() => this.handleResize(), 150);
         });
@@ -79,10 +90,15 @@ export class Engine {
     });
     window.visualViewport?.addEventListener('resize', onViewportChange);
 
-    // Pause when tab is hidden
+    // Pause game loop & audio when tab is hidden
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) this.pause();
-      else if (!this.orientationBlocked) this.resume();
+      if (document.hidden) {
+        this.pause();
+        this.audio.suspend();
+      } else if (!this.orientationBlocked) {
+        this.resume();
+        this.audio.resume();
+      }
     });
   }
 
@@ -107,7 +123,9 @@ export class Engine {
     this.updateOrientationGate();
 
     const { width: vw, height: vh } = getViewportSize();
-    const dpr = Math.min(window.devicePixelRatio || 1, 3);
+    // Cap DPR at 1.5 on phones (3x DPR causes 4x pixel overdraw & mobile lag!) and 2 on desktop
+    const maxDpr = isTouchDevice() ? 1.5 : 2;
+    const dpr = Math.min(window.devicePixelRatio || 1, maxDpr);
     const { width, height, scale } = calculateCanvasSize(
       this.gameWidth,
       this.gameHeight,

@@ -67,6 +67,7 @@ export class CatCompanionSystem {
   handleClick(pos: Vec2): boolean {
     if (!InputManager.hitTest(pos, this.boothRect, 6)) return false;
 
+    this.engine.audio.playSfx('meow');
     const reply = randPick(PET_RESPONSES);
     this.say(reply.speaker, reply.text, 3.6);
 
@@ -120,20 +121,14 @@ export class CatCompanionSystem {
 
     ctx.imageSmoothingEnabled = true;
 
-    // Left cat in booth: Vằn Bếp Trưởng
+    // Left cat in booth: Vằn Bếp Trưởng (zero shadowBlur for silky mobile 60fps!)
     if (this.engine.assets.hasImage('npc_cat_boss')) {
       const img = this.engine.assets.getImage('npc_cat_boss');
       const jump = this.bounceBoss > 0 ? Math.sin((this.bounceBoss / 0.45) * Math.PI) * -14 : 0;
       const idle = Math.sin(this.elapsed * 2.5) * 2;
       const dh = 82;
       const dw = (img.width / img.height) * dh;
-      ctx.save();
-      if (this.speaker === 'boss' || this.speaker === 'both') {
-        ctx.shadowColor = 'rgba(252, 163, 17, 0.55)';
-        ctx.shadowBlur = 10;
-      }
       ctx.drawImage(img, r.x + 8, r.y + r.height - dh + 4 + jump + idle, dw, dh);
-      ctx.restore();
     }
 
     // Right cat in booth: Mèo Vàng Phụ Bếp
@@ -143,13 +138,7 @@ export class CatCompanionSystem {
       const idle = Math.sin(this.elapsed * 2.5 + 1.3) * 2;
       const dh = 72;
       const dw = (img.width / img.height) * dh;
-      ctx.save();
-      if (this.speaker === 'golden' || this.speaker === 'both') {
-        ctx.shadowColor = 'rgba(244, 162, 97, 0.6)';
-        ctx.shadowBlur = 10;
-      }
       ctx.drawImage(img, r.x + r.width - dw - 6, r.y + r.height - dh + 4 + jump + idle, dw, dh);
-      ctx.restore();
     }
 
     // Compact live speech bubble right above the Cat Booth (y = 54..108)

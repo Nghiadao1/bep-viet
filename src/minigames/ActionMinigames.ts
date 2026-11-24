@@ -71,6 +71,7 @@ export class FirePumpMinigame implements CookingMinigame {
       this.holding = true;
       this.temp = clamp(this.temp + 15, 0, 100);
       this.flameBurst = 0.25;
+      this.ctx.engine.audio.playSfx('fire');
       const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
       this.ctx.particles.emitFireSparks(cx, 286, 10);
       this.ctx.particles.emitSteam(cx, 174, 2);
@@ -313,6 +314,7 @@ export class TimingCutMinigame implements CookingMinigame {
     let color: string;
 
     const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
+    this.ctx.engine.audio.playSfx(dist <= this.goodTol ? 'slice' : 'error');
     if (dist <= this.perfectTol) {
       hitScore = 100;
       label = '⭐ HOÀN HẢO!';
@@ -704,6 +706,7 @@ export class SliceLineMinigame implements CookingMinigame {
 
     const midX = (guide.x1 + guide.x2) / 2;
     const midY = (guide.y1 + guide.y2) / 2;
+    this.ctx.engine.audio.playSfx('slice');
     this.ctx.particles.emitSliceSparks(midX, midY, this.isBread ? '#ffd166' : '#ff758f', 14);
     if (accuracyScore >= 85) {
       this.ctx.particles.emitStarburst(midX, midY, '#ffd166', 10);
@@ -871,13 +874,14 @@ export class SliceLineMinigame implements CookingMinigame {
       for (let i = 1; i < this.trail.length; i++) {
         ctx.lineTo(this.trail[i].x, this.trail[i].y);
       }
-      ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 6;
+      // Outer cyan blade aura + crisp white core (zero shadowBlur for silky mobile FPS!)
+      ctx.strokeStyle = 'rgba(144, 224, 239, 0.55)';
+      ctx.lineWidth = 11;
       ctx.lineCap = 'round';
-      ctx.shadowColor = '#90e0ef';
-      ctx.shadowBlur = 12;
       ctx.stroke();
-      ctx.shadowBlur = 0;
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 5;
+      ctx.stroke();
 
       const tip = this.trail[this.trail.length - 1];
       ctx.font = '28px "Segoe UI"';
@@ -949,15 +953,18 @@ export class GrillFlipMinigame implements CookingMinigame {
     let sScore: number;
     if (this.cook >= this.sweetMin && this.cook <= this.sweetMax) {
       sScore = 100;
+      this.ctx.engine.audio.playSfx('fire');
       this.ctx.particles.emitStarburst(cx, 224, '#ffd166', 16);
       this.ctx.particles.emitFireSparks(cx, 232, 14);
       this.catQuote = 'Vàng ươm thơm nức cả khu phố!! Đúng chuẩn bếp than hoa! ⭐';
     } else if (this.cook >= this.sweetMin - 0.16 && this.cook <= Math.min(0.96, this.sweetMax + 0.08)) {
       sScore = 74;
+      this.ctx.engine.audio.playSfx('fire');
       this.ctx.particles.emitFireSparks(cx, 232, 10);
       this.catQuote = this.cook < this.sweetMin ? 'Hơi non chút xíu nhưng vẫn ngon!' : 'Suýt cháy cạnh rồi đó nha! 😅';
     } else {
       sScore = 40;
+      this.ctx.engine.audio.playSfx('error');
       this.ctx.particles.emitAngryPuff(cx, 224);
       this.ctx.particles.shake(5, 0.2);
       this.catQuote = this.cook < this.sweetMin - 0.16 ? 'Còn sống nhăn à! Chờ chín thêm chút nữa!' : 'Á cháy đen thui rồi!! 🙀';

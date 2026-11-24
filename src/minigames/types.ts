@@ -79,10 +79,10 @@ export function renderMinigameFrame(
   ctx.fillStyle = 'rgba(10, 11, 22, 0.72)';
   ctx.fillRect(0, 0, W, H);
 
-  // Outer warm wooden board shadow & frame
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
-  ctx.shadowBlur = 24;
-  ctx.shadowOffsetY = 8;
+  // Fast zero-blur drop shadow behind wooden board (60fps mobile safe!)
+  roundRect(ctx, b.x + 6, b.y + 8, b.width, b.height, 20);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+  ctx.fill();
 
   roundRect(ctx, b.x, b.y, b.width, b.height, 20);
   const bg = ctx.createLinearGradient(0, b.y, 0, b.y + b.height);
@@ -90,7 +90,6 @@ export function renderMinigameFrame(
   bg.addColorStop(1, '#1a1728');
   ctx.fillStyle = bg;
   ctx.fill();
-  ctx.shadowBlur = 0;
 
   roundRect(ctx, b.x, b.y, b.width, b.height, 20);
   ctx.strokeStyle = '#FCA311';
@@ -130,8 +129,6 @@ export function renderMinigameFrame(
     const img = engine.assets.getImage(catKey);
     const dh = 136;
     const dw = (img.width / img.height) * dh;
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 12;
     ctx.drawImage(img, 12, H - dh - 8 + bob, dw, dh);
     ctx.restore();
   }

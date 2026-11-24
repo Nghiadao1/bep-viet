@@ -231,12 +231,14 @@ export class ShopScene implements Scene {
 
     const cost = getShopItemCost(item, lv);
     if (!this.engine.save.spendMoney(cost)) {
+      this.engine.audio.playSfx('error');
       this.catQuote = `Chưa đủ tiền rồi! Cần ${formatMoney(cost)} — chơi thêm 1 màn nhận Rương Thưởng là đủ ngay! 🪙`;
       this.particles.emitAngryPuff(rect.x + rect.width / 2, rect.y + rect.height / 2);
       return;
     }
 
     this.engine.save.buyUpgrade(item.id);
+    this.engine.audio.playSfx('perfect');
     this.particles.emitStarburst(rect.x + rect.width / 2, rect.y + rect.height / 2, '#ffd166', 24);
     this.particles.emitFloatingText(
       rect.x + rect.width / 2,

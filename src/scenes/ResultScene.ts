@@ -76,6 +76,8 @@ export class ResultScene implements Scene {
 
   enter(): void {
     this.engine.input.clear();
+    this.engine.audio.playBgm('menu');
+    this.engine.audio.playSfx(this.data.stars > 0 ? 'win' : 'lose');
     this.elapsed = 0;
     this.starsRevealed = 0;
     this.starRevealTimer = 0.45;
@@ -223,6 +225,7 @@ export class ResultScene implements Scene {
     if (this.starRevealTimer <= 0 && this.starsRevealed < this.data.stars) {
       const idx = this.starsRevealed;
       this.starAnims[idx].revealed = true;
+      this.engine.audio.playSfx('coin');
       this.tweens.to(this.starAnims[idx] as unknown as Record<string, number>, { scale: 1, alpha: 1 }, 420, 'easeOutBack');
       this.starsRevealed++;
       this.starRevealTimer = 0.28;

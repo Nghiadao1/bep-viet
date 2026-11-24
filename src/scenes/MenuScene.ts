@@ -34,18 +34,17 @@ export class MenuScene implements Scene {
   private particles: SteamParticle[] = [];
   private buttons: MenuButton[] = [];
   private fullscreenBtn: Rect = { x: 800, y: 16, width: 144, height: 42 };
+  private muteBtn: Rect = { x: 18, y: 16, width: 126, height: 42 };
   private removeClick?: () => void;
   private glowPhase = 0;
-  private soundEnabled: boolean;
 
   constructor(engine: Engine) {
     this.engine = engine;
-    this.soundEnabled = !engine.audio.muted;
   }
 
   enter(): void {
     this.engine.input.clear();
-    this.soundEnabled = !this.engine.audio.muted;
+    this.engine.audio.playBgm('menu');
 
     // Initialize steam particles
     this.particles = [];
@@ -89,30 +88,40 @@ export class MenuScene implements Scene {
 
     // Input handling
     this.removeClick = this.engine.input.onClick((pos) => {
+      // Mute / Sound toggle button top-left
+      if (InputManager.hitTest(pos, this.muteBtn, 8)) {
+        this.engine.audio.toggleMute();
+        return;
+      }
       // Fullscreen toggle (mobile convenience)
       if (supportsFullscreen() && InputManager.hitTest(pos, this.fullscreenBtn, 8)) {
+        this.engine.audio.playSfx('click');
         void toggleFullscreen();
         return;
       }
       // Play button → Vietnam MapScene
       if (InputManager.hitTest(pos, this.buttons[0].rect, 4)) {
-        this.engine.audio.init();
+        this.engine.audio.unlock();
+        this.engine.audio.playSfx('click');
         this.engine.scenes.replace(new MapScene(this.engine));
         return;
       }
       // Tutorial button → Level 1 with 2-Cat NPC Tutorial
       if (InputManager.hitTest(pos, this.buttons[1].rect, 4)) {
-        this.engine.audio.init();
+        this.engine.audio.unlock();
+        this.engine.audio.playSfx('meow');
         this.engine.scenes.replace(new GameScene(this.engine, 1, true));
         return;
       }
       // Shop button → ShopScene
       if (InputManager.hitTest(pos, this.buttons[2].rect, 4)) {
+        this.engine.audio.playSfx('click');
         this.engine.scenes.replace(new ShopScene(this.engine, 'menu'));
         return;
       }
       // Recipe book button → RecipeBookScene
       if (InputManager.hitTest(pos, this.buttons[3].rect, 4)) {
+        this.engine.audio.playSfx('click');
         this.engine.scenes.replace(new RecipeBookScene(this.engine));
         return;
       }
@@ -199,21 +208,16 @@ export class MenuScene implements Scene {
       ctx.fill();
     }
 
-    // --- Title with glow ---
+    // --- Title with crisp zero-blur layered glow (60fps mobile safe!) ---
     const glowAlpha = 0.3 + 0.2 * Math.sin(this.glowPhase * 2);
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-
-    // Glow
-    ctx.shadowColor = '#FCA311';
-    ctx.shadowBlur = 30 + 10 * Math.sin(this.glowPhase * 2);
     ctx.font = 'bold 72px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = 'rgba(232, 93, 4, 0.35)';
+    ctx.fillText('🍜 Bếp Việt', W / 2, 164);
     ctx.fillStyle = '#FCA311';
     ctx.fillText('🍜 Bếp Việt', W / 2, 160);
-
-    ctx.shadowBlur = 0;
-    ctx.shadowColor = 'transparent';
 
     // Subtitle
     ctx.font = '24px "Segoe UI", system-ui, sans-serif';
@@ -230,25 +234,20 @@ export class MenuScene implements Scene {
 
     ctx.restore();
 
-    // --- Buttons ---
+    // --- Buttons (fast offset shadow instead of shadowBlur!) ---
     for (const btn of this.buttons) {
       const { rect } = btn;
       const pointer = this.engine.input.pointer;
       const hover = InputManager.hitTest(pointer, rect);
       const color = hover ? btn.hoverColor : btn.color;
 
-      // Shadow
-      ctx.save();
-      ctx.shadowColor = 'rgba(0,0,0,0.4)';
-      ctx.shadowBlur = 8;
-      ctx.shadowOffsetY = 4;
+      roundRect(ctx, rect.x, rect.y + 4, rect.width, rect.height, 12);
+      ctx.fillStyle = 'rgba(0,0,0,0.35)';
+      ctx.fill();
 
       roundRect(ctx, rect.x, rect.y, rect.width, rect.height, 12);
       ctx.fillStyle = color;
       ctx.fill();
-
-      ctx.shadowColor = 'transparent';
-      ctx.restore();
 
       // Border
       roundRect(ctx, rect.x, rect.y, rect.width, rect.height, 12);
@@ -270,6 +269,26 @@ export class MenuScene implements Scene {
         1,
       );
     }
+
+    // --- Sound Mute Toggle (top-left) ---
+    const mb = this.muteBtn;
+    const mbHover = InputManager.hitTest(this.engine.input.pointer, mb);
+    roundRect(ctx, mb.x, mb.y, mb.width, mb.height, 10);
+    ctx.fillStyle = mbHover ? 'rgba(252,163,17,0.3)' : 'rgba(17,19,38,0.68)';
+    ctx.fill();
+    ctx.strokeStyle = this.engine.audio.muted ? 'rgba(230,57,70,0.6)' : 'rgba(252,163,17,0.5)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(
+      ctx,
+      this.engine.audio.muted ? '🔇 Tắt tiếng' : '🔊 Âm thanh',
+      mb.x + mb.width / 2,
+      mb.y + mb.height / 2,
+      '#fff',
+    );
 
     // --- Fullscreen button (top-right for mobile landscape play) ---
     if (supportsFullscreen()) {

@@ -83,6 +83,7 @@ export class SwirlWhiskMinigame implements CookingMinigame {
         this.foam = Math.min(1, this.foam + absDelta / (Math.PI * 2 * this.targetTurns));
 
         if (Math.random() < 0.45) {
+          this.ctx.engine.audio.playSfx('splash');
           this.ctx.particles.emitLiquidSplash(
             this.bowlCx + Math.cos(angle) * 42,
             this.bowlCy + Math.sin(angle) * 42,
@@ -278,6 +279,7 @@ export class RollWrapMinigame implements CookingMinigame {
 
     if (matched) {
       this.foldStage++;
+      this.ctx.engine.audio.playSfx('pop');
       this.ctx.particles.emitStarburst(cx, 268, '#80ed99', 14);
       if (this.foldStage === 1) {
         this.catQuote = 'Gọn lắm! Bước 2: Vuốt sang TRÁI ⬅️ để gấp mép bên phải vào!';
@@ -382,14 +384,12 @@ export class RollWrapMinigame implements CookingMinigame {
       ctx.fillText('✨ CUỐN TRÒN CHẮC TAY! ✨', cx, cy);
     }
 
-    // Animated directional swipe guide arrow
+    // Animated directional swipe guide arrow (zero shadowBlur!)
     if (this.foldStage < 3) {
       const slide = Math.sin(this.elapsed * 6) * 14;
       ctx.font = 'bold 42px "Segoe UI"';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.shadowColor = '#000';
-      ctx.shadowBlur = 8;
       if (this.foldStage === 0) {
         ctx.fillText('➡️', cx - 115 + slide, cy);
       } else if (this.foldStage === 1) {
@@ -397,7 +397,6 @@ export class RollWrapMinigame implements CookingMinigame {
       } else {
         ctx.fillText('⬆️', cx, cy + 54 - Math.abs(slide));
       }
-      ctx.shadowBlur = 0;
     }
 
     // 3 step indicator pills
@@ -451,6 +450,7 @@ export class BlanchDipMinigame implements CookingMinigame {
     if (this.result) return;
     if (InputManager.hitTest(pos, BOARD_RECT)) {
       this.dipping = true;
+      this.ctx.engine.audio.playSfx('splash');
       const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
       this.ctx.particles.emitLiquidSplash(cx, 250, '#90e0ef', 8);
       this.ctx.particles.emitSteam(cx, 232, 3);
@@ -660,11 +660,13 @@ export class SqueezeLimeMinigame implements CookingMinigame {
     if (Math.abs(seedPos) < 0.34) {
       // Oops! Seed dropped into the bowl!
       this.seedFallen++;
+      this.ctx.engine.audio.playSfx('error');
       this.ctx.particles.emitAngryPuff(cx, 250);
       this.ctx.particles.shake(4, 0.16);
       this.catQuote = 'Ối rơi hạt chanh cái tõm vào tô rồi!! Canh hạt lệch sang 2 bên hãy vắt! 🍋🙀';
     } else {
       this.drops++;
+      this.ctx.engine.audio.playSfx('splash');
       this.ctx.particles.emitLiquidSplash(cx, 275, '#b7e868', 10);
       this.ctx.particles.emitStarburst(cx, 285, '#80ed99', 8);
       this.catQuote = `Tách tách! Nước cốt chanh thơm lừng (${this.drops}/${this.targetDrops})! ✨`;
@@ -827,6 +829,7 @@ export class IceCrushMinigame implements CookingMinigame {
       if (Math.hypot(pos.x - s.x, pos.y - s.y) <= s.r + 12) {
         s.broken = true;
         this.blockShake = 0.2;
+        this.ctx.engine.audio.playSfx('ice');
         this.ctx.particles.emitSliceSparks(s.x, s.y, '#90e0ef', 16);
         this.ctx.particles.emitLiquidSplash(s.x, s.y, '#d8f3fc', 6);
         this.ctx.particles.shake(3.5, 0.12);
@@ -1011,6 +1014,7 @@ export class PourTrayMinigame implements CookingMinigame {
 
     if (s.fill >= this.sweetMin && s.fill <= this.sweetMax) {
       s.score = 100;
+      this.ctx.engine.audio.playSfx('splash');
       this.ctx.particles.emitStarburst(s.x, s.y, '#ffd166', 14);
       this.ctx.particles.emitSpiceRain(s.x, s.y, '#f47b20');
       this.catQuote = 'Tròn xoe trắng mịn + rắc tôm cháy mỡ hành đẹp mê ly!! ✨';

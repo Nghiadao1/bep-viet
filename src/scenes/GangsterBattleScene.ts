@@ -72,6 +72,8 @@ export class GangsterBattleScene implements Scene {
 
   enter(): void {
     this.engine.input.clear();
+    this.engine.audio.playBgm('action');
+    this.engine.audio.playSfx('meow');
     this.phase = 'intro';
     this.elapsed = 0;
     this.phaseTimer = 0;
@@ -120,6 +122,7 @@ export class GangsterBattleScene implements Scene {
   }
 
   private pickMove(move: RpsMove): void {
+    this.engine.audio.playSfx('click');
     this.playerMove = move;
     this.gangsterMove = randPick<RpsMove>(['rock', 'scissors', 'paper']);
     this.roundWinner = this.resolveRps(move, this.gangsterMove);
@@ -154,15 +157,18 @@ export class GangsterBattleScene implements Scene {
         this.phaseTimer = 0;
 
         if (this.roundWinner === 'tie') {
+          this.engine.audio.playSfx('pop');
           this.particles.emitStarburst(480, 260, '#ffd166', 18);
           this.bannerText = '⚡ HÒA NHAU!! TRÙNG CHIÊU RỒI!!';
           this.subText = 'Hai bên lườm nhau tóe lửa — chuẩn bị ra chiêu tiếp theo!';
         } else if (this.roundWinner === 'hero') {
+          this.engine.audio.playSfx('punch');
           const heroName = this.activeHero === 'boss' ? '👑 Vằn Bếp Trưởng' : '🐾 Mèo Vàng';
           this.bannerText = `${heroName} THẮNG HIỆP ${this.roundNumber}!! LAO VÀO TẨN GIANG HỒ!!`;
           this.subText = `${this.hitWord} Đại Ca Mèo Giang Hồ lãnh trọn liên hoàn cước!`;
           this.particles.shake(9, 0.55);
         } else {
+          this.engine.audio.playSfx('punch');
           this.bannerText = '🙀 ĐẠI CA MÈO GIANG HỒ PHẢN CÔNG!!';
           this.subText = `${this.hitWord} Ôi đau quá! Đổi đồng đội vào gánh tiếp thôi!!`;
           this.particles.shake(9, 0.55);
@@ -181,6 +187,7 @@ export class GangsterBattleScene implements Scene {
       // Apply HP hit midway through brawl animation!
       if (!this.damageApplied && this.phaseTimer >= 0.55) {
         this.damageApplied = true;
+        this.engine.audio.playSfx('punch');
         if (this.roundWinner === 'hero') {
           this.gangsterHp = Math.max(0, this.gangsterHp - 1);
           this.particles.emitStarburst(650, 260, '#ffd166', 24);
@@ -197,6 +204,7 @@ export class GangsterBattleScene implements Scene {
         if (this.gangsterHp <= 0) {
           this.phase = 'victory';
           this.phaseTimer = 0;
+          this.engine.audio.playSfx('win');
           this.engine.save.addMoney(this.rewardMoney);
           this.particles.emitStarburst(480, 240, '#4CAF50', 36);
           this.particles.emitCoinShower(650, 250, 480, 120, 10);
@@ -205,6 +213,7 @@ export class GangsterBattleScene implements Scene {
         if (this.heroHp <= 0) {
           this.phase = 'defeat';
           this.phaseTimer = 0;
+          this.engine.audio.playSfx('lose');
           // Penalty: lose 50% of current money!
           const curMoney = this.engine.save.current.money;
           this.lostMoneyAmount = Math.floor(curMoney / 2);
@@ -463,9 +472,11 @@ export class GangsterBattleScene implements Scene {
         ctx.rotate(this.phaseTimer * 10);
       }
       if (gangsterHurtFlash && Math.floor(this.elapsed * 24) % 2 === 0) ctx.globalAlpha = 0.45;
-      // Dramatic red rim glow behind gangster cat!
-      ctx.shadowColor = 'rgba(230, 57, 70, 0.75)';
-      ctx.shadowBlur = 18;
+      // Zero-blur glowing red fighter aura behind gangster cat (mobile 60fps safe!)
+      ctx.beginPath();
+      ctx.arc(0, 0, 88, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(230, 57, 70, 0.22)';
+      ctx.fill();
       ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
       ctx.restore();
     }

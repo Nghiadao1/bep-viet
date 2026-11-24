@@ -81,6 +81,7 @@ export class MarketRunnerScene implements Scene {
 
   enter(): void {
     this.engine.input.clear();
+    this.engine.audio.playBgm('action');
     this.phase = 'intro';
     this.elapsed = 0;
     this.timeRemaining = 22;
@@ -161,6 +162,7 @@ export class MarketRunnerScene implements Scene {
     if (next !== this.lane) {
       this.lane = next;
       this.hopTimer = 0.22;
+      this.engine.audio.playSfx('pop');
       const px = this.laneToX(this.visualLane, 1);
       this.particles.emitSliceSparks(px, 456, '#ffd166', 6);
     }
@@ -247,6 +249,7 @@ export class MarketRunnerScene implements Scene {
             this.collected++;
             const bonus = randInt(10, 16);
             this.coinsEarned += bonus;
+            this.engine.audio.playSfx('coin');
             this.particles.emitStarburst(ex, ey, '#ffd166', 14);
             this.particles.emitFloatingText(ex, ey - 24, `+1 ${ent.label}!`, '#80ed99', 16);
             if (this.collected >= this.targetCollect) {
@@ -256,6 +259,7 @@ export class MarketRunnerScene implements Scene {
           } else if (this.invulnTimer <= 0) {
             this.hearts--;
             this.invulnTimer = 1.05;
+            this.engine.audio.playSfx('error');
             this.particles.emitAngryPuff(ex, ey);
             this.particles.shake(8, 0.28);
             this.particles.emitFloatingText(ex, ey - 26, `💥 Đụng ${ent.label}`, '#E63946', 18);
@@ -276,6 +280,7 @@ export class MarketRunnerScene implements Scene {
   private finishRun(): void {
     this.phase = 'summary';
     this.elapsed = 0;
+    this.engine.audio.playSfx(this.hearts > 0 ? 'win' : 'lose');
     this.particles.emitStarburst(480, 260, '#ffd166', 28);
   }
 

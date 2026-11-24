@@ -26,7 +26,7 @@ import {
   type ActiveUpgradeBonuses,
   type StallTierInfo,
 } from './ShopScene';
-import { supportsFullscreen, toggleFullscreen } from '../utils/mobile';
+import { isTouchDevice, supportsFullscreen, toggleFullscreen } from '../utils/mobile';
 import { TutorialSystem, type TutorialTarget } from '../systems/TutorialSystem';
 import { CatCompanionSystem } from '../systems/CatCompanionSystem';
 import { ParticleSystem } from '../systems/ParticleSystem';
@@ -160,8 +160,9 @@ export class GameScene implements Scene {
 
   // UI Rects
   private pauseBtn: Rect = { x: 896, y: 6, width: 52, height: 40 };
-  private fullscreenBtn: Rect = { x: 836, y: 6, width: 50, height: 40 };
-  private finishEarlyBtn: Rect = { x: 584, y: 8, width: 122, height: 36 };
+  private fullscreenBtn: Rect = { x: 838, y: 6, width: 50, height: 40 };
+  private muteBtn: Rect = { x: 786, y: 6, width: 44, height: 40 };
+  private finishEarlyBtn: Rect = { x: 562, y: 8, width: 112, height: 36 };
   private serveBtn: Rect = { x: 672, y: 320, width: 178, height: 66 };
   private trashBtn: Rect = { x: 858, y: 320, width: 80, height: 66 };
   private openShopNowBtn: Rect = { x: 350, y: 432, width: 260, height: 54 };
@@ -203,6 +204,7 @@ export class GameScene implements Scene {
 
   enter(): void {
     this.engine.input.clear();
+    this.engine.audio.playBgm('kitchen');
     this.elapsed = 0;
 
     const cfg = getLevel(this.levelId);
@@ -479,12 +481,18 @@ export class GameScene implements Scene {
       return;
     }
 
-    // Top-right Fullscreen & Pause
+    // Top-right Mute, Fullscreen & Pause
+    if (InputManager.hitTest(pos, this.muteBtn, 6)) {
+      this.engine.audio.toggleMute();
+      return;
+    }
     if (supportsFullscreen() && InputManager.hitTest(pos, this.fullscreenBtn, 6)) {
+      this.engine.audio.playSfx('click');
       void toggleFullscreen();
       return;
     }
     if (InputManager.hitTest(pos, this.pauseBtn, 6)) {
+      this.engine.audio.playSfx('click');
       this.paused = !this.paused;
       return;
     }
@@ -505,6 +513,7 @@ export class GameScene implements Scene {
     if (this.briefingOpen) {
       if (InputManager.hitTest(pos, this.startBriefingBtn, 16) || this.briefingElapsed > 0.35) {
         this.briefingOpen = false;
+        this.engine.audio.playSfx('click');
         this.particles.emitStarburst(480, 270, '#ffd166', 18);
         this.cats.say('boss', 'Pha 1 Sơ Chế bắt đầu! Chạm từng khay phát sáng để chuẩn bị nguyên liệu nhé! 🔥', 4.0);
       }
@@ -609,6 +618,7 @@ export class GameScene implements Scene {
     const tr = this.trays[trayIdx];
     if (!tr || this.activeMinigame) return;
 
+    this.engine.audio.playSfx('click');
     this.activePrepTrayIndex = trayIdx;
     this.minigameCounter++;
 
@@ -656,6 +666,7 @@ export class GameScene implements Scene {
 
       const cx = tr.x + tr.width / 2;
       const cy = tr.y + tr.height / 2;
+      this.engine.audio.playSfx(boostedScore >= 85 ? 'perfect' : 'pop');
       this.particles.emitStarburst(cx, cy, boostedScore >= 85 ? '#ffd166' : '#4CAF50', 20);
       this.particles.emitFloatingText(
         cx,
@@ -681,6 +692,7 @@ export class GameScene implements Scene {
     if (this.phase === 'service') return;
     this.phase = 'service';
     this.layoutTrays();
+    this.engine.audio.playSfx('win');
     this.phaseBannerText = `🔔 MỞ ${this.stallTier.name.toUpperCase()} — PHA 2: PICK & MIX!`;
     this.phaseBannerTimer = 2.4;
     this.spawnTimer = 200; // First customer arrives immediately!
@@ -714,6 +726,7 @@ export class GameScene implements Scene {
 
     const reqBases = this.getRequiredBases(cust.order);
     if (!reqBases.includes(tr.type)) {
+      this.engine.audio.playSfx('error');
       this.showFeedback(`❌ Món ${cust.order.name} không cần ${tr.shortName}!`, '#E63946');
       this.particles.emitAngryPuff(tr.x + tr.width / 2, tr.y + 24);
       this.particles.shake(4, 0.14);
@@ -722,6 +735,7 @@ export class GameScene implements Scene {
     }
 
     if (this.assembledBases.includes(tr.type)) {
+      this.engine.audio.playSfx('click');
       this.showFeedback(`✅ Đã cho ${tr.shortName} vào món rồi!`, '#80ed99');
       return;
     }
@@ -730,6 +744,7 @@ export class GameScene implements Scene {
     tr.stock = Math.max(0, tr.stock - 1);
     tr.flashTimer = 0.4;
     this.assembledBases.push(tr.type);
+    this.engine.audio.playSfx('pop');
 
     const tx = tr.x + tr.width / 2;
     const ty = tr.y + tr.height / 2;
@@ -753,6 +768,7 @@ export class GameScene implements Scene {
 
     if (this.assembledToppings.has(option.id)) {
       this.assembledToppings.delete(option.id);
+      this.engine.audio.playSfx('click');
       this.showFeedback(`Đã gắp ${option.label} ra`, '#cbd5e1');
       return;
     }
@@ -761,14 +777,17 @@ export class GameScene implements Scene {
     this.particles.emitSpiceRain(515, 350, option.color);
 
     if (cust.taste.forbidden && option.id === cust.taste.forbidden.id) {
+      this.engine.audio.playSfx('error');
       this.particles.emitAngryPuff(515, 345);
       this.particles.shake(4.5, 0.16);
       this.showFeedback(`🚫 Khách dặn KHÔNG ${option.label.toUpperCase()}! Chạm lại để gắp ra!`, '#E63946');
       this.cats.say('boss', `Á!! Khách kiêng ${option.label} mà! Chạm lại hũ đó để gắp ra mau!! 🙀`, 3.5);
     } else if (cust.taste.wanted.some((w) => w.id === option.id)) {
+      this.engine.audio.playSfx('spice');
       this.particles.emitStarburst(515, 344, '#ffd166', 10);
       this.showFeedback(`✅ Đúng vị ${option.emoji} ${option.label}!`, '#4CAF50');
     } else {
+      this.engine.audio.playSfx('spice');
       this.showFeedback(`Đã thêm ${option.emoji} ${option.label}`, '#FCA311');
     }
   }
@@ -795,6 +814,7 @@ export class GameScene implements Scene {
     const missingBase = reqBases.find((st) => !this.assembledBases.includes(st));
     if (missingBase) {
       const m = STATION_META[missingBase];
+      this.engine.audio.playSfx('error');
       this.showFeedback(`⚠️ Chưa đủ món! Còn thiếu ${m.icon} ${m.name}!`, '#E63946');
       this.particles.shake(4, 0.15);
       this.cats.say('boss', `Khoan giao! Còn thiếu ${m.icon} ${m.name} trong tô kìa! 😾`, 3.2);
@@ -870,7 +890,8 @@ export class GameScene implements Scene {
         : 'Cảm ơn hai bé mèo nha!';
     target.speechTimer = 2.0;
 
-    // Juicy FX!
+    // Juicy FX & Sound!
+    this.engine.audio.playSfx(finalQuality >= 85 ? 'perfect' : 'coin');
     const custCx = target.x + target.width / 2;
     const custCy = target.y + 30;
     this.particles.emitStarburst(custCx, custCy, finalQuality >= 85 ? '#ffd166' : '#4CAF50', 22);
@@ -1012,16 +1033,17 @@ export class GameScene implements Scene {
       if (tr.flashTimer > 0) tr.flashTimer = Math.max(0, tr.flashTimer - dt);
     }
 
-    // Ambient lantern dust & hot tray steam
+    // Ambient lantern dust & hot tray steam (throttled lightly on mobile for 60fps!)
     if (!this.activeMinigame) {
-      if (Math.random() < dt * 4.0) {
+      const ambScale = isTouchDevice() ? 0.45 : 1;
+      if (Math.random() < dt * 4.0 * ambScale) {
         this.particles.emitLanternDust(randFloat(40, 920), randFloat(68, 165));
       }
       for (const tr of this.getVisibleTrays()) {
         if (
           tr.prepped &&
           (tr.type === StationType.BROTH || tr.type === StationType.GRILL || tr.type === StationType.WOK) &&
-          Math.random() < dt * 2.2
+          Math.random() < dt * 2.2 * ambScale
         ) {
           this.particles.emitSteam(tr.x + tr.width / 2, tr.y + 12, 1);
         }
@@ -1110,6 +1132,7 @@ export class GameScene implements Scene {
           this.clearAssemblyBowl(false);
           this.refreshToppingBar();
         }
+        this.engine.audio.playSfx('error');
         this.showFeedback('😡 Khách bỏ đi!', '#E63946');
         this.particles.emitAngryPuff(c.x + c.width / 2, c.y + 24);
         this.particles.shake(5, 0.2);
@@ -1336,14 +1359,27 @@ export class GameScene implements Scene {
       : this.timeRemaining < 30 ? '#FCA311'
       : '#fff';
     ctx.textAlign = 'right';
-    ctx.font = 'bold 21px monospace';
-    const timerRightX = supportsFullscreen() ? W - 138 : W - 76;
+    ctx.font = 'bold 20px monospace';
+    const timerRightX = this.muteBtn.x - 10;
     drawTextShadow(
       ctx,
       this.phase === 'prep' ? '🌅 SƠ CHẾ' : `⏱ ${formatTime(this.timeRemaining)}`,
       timerRightX,
       25,
       timeColor,
+    );
+
+    // Mute toggle button
+    roundRect(ctx, this.muteBtn.x, this.muteBtn.y, this.muteBtn.width, this.muteBtn.height, 8);
+    ctx.fillStyle = this.engine.audio.muted ? 'rgba(230, 57, 70, 0.55)' : 'rgba(255,255,255,0.14)';
+    ctx.fill();
+    ctx.textAlign = 'center';
+    ctx.font = '18px "Segoe UI"';
+    ctx.fillStyle = '#fff';
+    ctx.fillText(
+      this.engine.audio.muted ? '🔇' : '🔊',
+      this.muteBtn.x + this.muteBtn.width / 2,
+      this.muteBtn.y + this.muteBtn.height / 2,
     );
 
     if (supportsFullscreen()) {
@@ -1481,10 +1517,10 @@ export class GameScene implements Scene {
 
       ctx.save();
 
-      // Tray stainless-steel / wooden container shadow
-      ctx.shadowColor = 'rgba(0,0,0,0.45)';
-      ctx.shadowBlur = 10;
-      ctx.shadowOffsetY = 4;
+      // Fast zero-blur drop shadow beneath tray (10x faster on mobile GPUs!)
+      roundRect(ctx, tr.x, tr.y + 4, tr.width, tr.height, 14);
+      ctx.fillStyle = 'rgba(0,0,0,0.36)';
+      ctx.fill();
 
       roundRect(ctx, tr.x, tr.y, tr.width, tr.height, 14);
       if (tr.flashTimer > 0) {
@@ -1497,7 +1533,6 @@ export class GameScene implements Scene {
         ctx.fillStyle = hover ? 'rgba(35, 30, 52, 0.85)' : 'rgba(18, 16, 30, 0.74)';
       }
       ctx.fill();
-      ctx.shadowBlur = 0;
 
       // Glowing border for active Prep / Needed Service Ingredient
       roundRect(ctx, tr.x, tr.y, tr.width, tr.height, 14);

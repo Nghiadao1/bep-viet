@@ -118,6 +118,7 @@ export class WormCatchVeggieMinigame implements CookingMinigame {
       const w = this.activeWorm;
       if (Math.hypot(pos.x - w.x, pos.y - w.y) <= w.r + 16) {
         this.wormsCaught++;
+        this.ctx.engine.audio.playSfx('worm');
         this.ctx.particles.emitStarburst(w.x, w.y, '#ffd166', 18);
         this.popups.push({ text: '⚡ BẮT GỌN SÂU!', color: '#ffd166', x: w.x, y: w.y - 12, alpha: 1 });
         this.catQuote = 'Phản xạ siêu đỉnh!! Tóm gọn bé sâu luôn rồi! ⭐';
@@ -133,6 +134,7 @@ export class WormCatchVeggieMinigame implements CookingMinigame {
       if (leaf.picked) continue;
       if (Math.hypot(pos.x - leaf.x, pos.y - leaf.y) <= leaf.r + 10) {
         leaf.picked = true;
+        this.ctx.engine.audio.playSfx('pop');
         this.ctx.particles.emitLeafBurst(leaf.x, leaf.y);
         this.popups.push({ text: '🌿 Sạch!', color: '#80ed99', x: leaf.x, y: leaf.y - 10, alpha: 1 });
 
@@ -194,6 +196,7 @@ export class WormCatchVeggieMinigame implements CookingMinigame {
         const w = this.activeWorm;
         this.activeWorm = null;
         this.wormsEscaped++;
+        this.ctx.engine.audio.playSfx('error');
         this.ctx.particles.emitAngryPuff(w.x, w.y);
         this.ctx.particles.shake(4.5, 0.18);
         this.popups.push({ text: '💨 Sâu trốn mất!', color: '#E63946', x: w.x, y: w.y, alpha: 1 });
@@ -468,6 +471,7 @@ export class FruitSliceMinigame implements CookingMinigame {
         item.sliced = true;
         if (item.isBomb) {
           this.bombHits++;
+          this.ctx.engine.audio.playSfx('error');
           this.ctx.particles.emitFireSparks(item.x, item.y, 24);
           this.ctx.particles.emitAngryPuff(item.x, item.y);
           this.ctx.particles.shake(8, 0.26);
@@ -477,6 +481,7 @@ export class FruitSliceMinigame implements CookingMinigame {
           this.slicedCount++;
           this.swipeComboCount++;
           hitInStep++;
+          this.ctx.engine.audio.playSfx(this.swipeComboCount >= 2 ? 'perfect' : 'slice');
 
           // Split into 2 spinning halves!
           this.halves.push(
