@@ -12,6 +12,21 @@ export class Game {
 
   constructor(canvas: HTMLCanvasElement) {
     this.engine = new Engine(canvas);
+    // Expose convenient console cheat helpers for quick testing
+    (window as unknown as Record<string, unknown>).bepVietCheat = {
+      unlockAll: () => {
+        this.engine.save.unlockAllLevels();
+        console.log('🔓 Bếp Việt Cheat: Đã mở khóa toàn bộ 50 màn & 18 công thức!');
+      },
+      addMoney: (amount = 5000) => {
+        this.engine.save.grantCheatResources(amount, 10);
+        console.log(`💰 Bếp Việt Cheat: Đã cộng +${amount}đ & +10 Trà Đá!`);
+      },
+      reset: () => {
+        this.engine.save.reset();
+        console.log('🔄 Bếp Việt Cheat: Đã reset save về Màn 1!');
+      },
+    };
   }
 
   /** Load all pixel art sprites and start the first scene */

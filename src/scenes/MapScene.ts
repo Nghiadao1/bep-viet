@@ -180,12 +180,26 @@ export class MapScene implements Scene {
     rect: Rect;
   }> = [];
 
+  // Secret Cheat Panel State (5 taps on "🗺 Bản Đồ Bếp Việt" OR type "meow" / press F9!)
+  private titleCheatRect: Rect = { x: 140, y: 8, width: 246, height: 48 };
+  private cheatTapCount = 0;
+  private cheatTapResetTimer = 0;
+  private cheatKeyBuffer = '';
+  private cheatOpen = false;
+  private cheatCloseBtn: Rect = { x: 668, y: 108, width: 38, height: 38 };
+  private cheatUnlockBtn: Rect = { x: 294, y: 184, width: 372, height: 56 };
+  private cheatMoneyBtn: Rect = { x: 294, y: 254, width: 372, height: 56 };
+  private cheatResetBtn: Rect = { x: 294, y: 324, width: 372, height: 50 };
+  private toastText = '';
+  private toastTimer = 0;
+
   // Cached projected polygons + offscreen static map canvas (huge mobile FPS win!)
   private mainlandPts: Vec2[] = [];
   private phuQuocPts: Vec2[] = [];
   private staticMapCanvas: HTMLCanvasElement | null = null;
 
   private removeClick?: () => void;
+  private keyHandler?: (e: KeyboardEvent) => void;
 
   constructor(engine: Engine) {
     this.engine = engine;
@@ -248,7 +262,74 @@ export class MapScene implements Scene {
       };
     });
 
+    this.cheatOpen = false;
+    this.cheatTapCount = 0;
+    this.cheatTapResetTimer = 0;
+    this.cheatKeyBuffer = '';
+    this.toastText = '';
+    this.toastTimer = 0;
+
+    // Keyboard secret shortcut: press F9 or type "meow" to open Cheat Panel!
+    this.keyHandler = (e: KeyboardEvent) => {
+      if (e.key === 'F9') {
+        e.preventDefault();
+        this.cheatOpen = !this.cheatOpen;
+        this.eventHubOpen = false;
+        this.engine.audio.playSfx('pop');
+        if (this.cheatOpen) this.engine.audio.playCatVoice('boss');
+        return;
+      }
+      if (e.key.length === 1) {
+        this.cheatKeyBuffer = (this.cheatKeyBuffer + e.key.toLowerCase()).slice(-8);
+        if (this.cheatKeyBuffer.endsWith('meow')) {
+          this.cheatKeyBuffer = '';
+          this.cheatOpen = true;
+          this.eventHubOpen = false;
+          this.engine.audio.playSfx('perfect');
+          this.engine.audio.playCatVoice('both');
+        }
+      }
+    };
+    window.addEventListener('keydown', this.keyHandler);
+
     this.removeClick = this.engine.input.onClick((pos) => {
+      // If Secret Cheat Panel is open, consume clicks here!
+      if (this.cheatOpen) {
+        if (InputManager.hitTest(pos, this.cheatCloseBtn, 8)) {
+          this.engine.audio.playSfx('click');
+          this.cheatOpen = false;
+          return;
+        }
+        if (InputManager.hitTest(pos, this.cheatUnlockBtn, 6)) {
+          this.engine.save.unlockAllLevels();
+          this.engine.audio.playSfx('win');
+          this.engine.audio.playCatVoice('both');
+          this.cheatOpen = false;
+          this.showToast('🔓 CHEAT ĐÃ BẬT! Đã mở khóa hết 50 Level & 18 Món ăn!');
+          return;
+        }
+        if (InputManager.hitTest(pos, this.cheatMoneyBtn, 6)) {
+          this.engine.save.grantCheatResources(5000, 10);
+          this.engine.audio.playSfx('coin');
+          this.engine.audio.playCatVoice('golden');
+          this.showToast('💰 Đã cộng +5,000đ & +10 🧋 Trà Đá!');
+          return;
+        }
+        if (InputManager.hitTest(pos, this.cheatResetBtn, 6)) {
+          this.engine.save.reset();
+          this.selectedChapterIdx = 0;
+          this.engine.audio.playSfx('click');
+          this.cheatOpen = false;
+          this.showToast('🔄 Đã reset tiến trình về Màn 1!');
+          return;
+        }
+        if (pos.x < 246 || pos.x > 714 || pos.y < 96 || pos.y > 416) {
+          this.engine.audio.playSfx('click');
+          this.cheatOpen = false;
+        }
+        return;
+      }
+
       // If 8-Card Mini Game Event Hub modal is open, consume clicks here!
       if (this.eventHubOpen) {
         if (InputManager.hitTest(pos, this.eventHubCloseBtn, 8)) {
@@ -265,6 +346,22 @@ export class MapScene implements Scene {
         if (pos.x < 68 || pos.x > 892 || pos.y < 48 || pos.y > 498) {
           this.engine.audio.playSfx('click');
           this.eventHubOpen = false;
+        }
+        return;
+      }
+
+      // Secret 5-tap trigger on "🗺 Bản Đồ Bếp Việt" title (mobile + desktop!)
+      if (InputManager.hitTest(pos, this.titleCheatRect, 4)) {
+        this.cheatTapCount++;
+        this.cheatTapResetTimer = 2.2;
+        if (this.cheatTapCount >= 5) {
+          this.cheatTapCount = 0;
+          this.cheatOpen = true;
+          this.engine.audio.playSfx('perfect');
+          this.engine.audio.playCatVoice('boss');
+        } else if (this.cheatTapCount >= 3) {
+          this.engine.audio.playSfx('pop');
+          this.showToast(`🐾 Chạm thêm ${5 - this.cheatTapCount} lần để mở Bảng Cheat...`);
         }
         return;
       }
@@ -402,13 +499,29 @@ export class MapScene implements Scene {
     }
   }
 
+  private showToast(text: string): void {
+    this.toastText = text;
+    this.toastTimer = 3.0;
+  }
+
   exit(): void {
     this.removeClick?.();
     this.removeClick = undefined;
+    if (this.keyHandler) {
+      window.removeEventListener('keydown', this.keyHandler);
+      this.keyHandler = undefined;
+    }
   }
 
   update(dt: number): void {
     this.elapsed += dt;
+    if (this.cheatTapResetTimer > 0) {
+      this.cheatTapResetTimer -= dt;
+      if (this.cheatTapResetTimer <= 0) this.cheatTapCount = 0;
+    }
+    if (this.toastTimer > 0) {
+      this.toastTimer = Math.max(0, this.toastTimer - dt);
+    }
   }
 
   render(ctx: CanvasRenderingContext2D): void {
@@ -435,6 +548,96 @@ export class MapScene implements Scene {
     if (this.eventHubOpen) {
       this.renderEventHubModal(ctx, W, H);
     }
+
+    // Optional Secret Cheat Panel Modal!
+    if (this.cheatOpen) {
+      this.renderCheatModal(ctx, W, H);
+    }
+
+    // Crisp Toast Feedback Banner
+    if (this.toastTimer > 0 && this.toastText) {
+      ctx.save();
+      ctx.globalAlpha = Math.min(1, this.toastTimer * 1.4);
+      ctx.font = 'bold 15px "Segoe UI", system-ui, sans-serif';
+      const tw = Math.min(680, ctx.measureText(this.toastText).width + 38);
+      roundRect(ctx, (W - tw) / 2, 68, tw, 40, 12);
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.95)';
+      ctx.fill();
+      ctx.strokeStyle = '#ffd166';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      drawTextShadow(ctx, this.toastText, W / 2, 88, '#ffd166');
+      ctx.restore();
+    }
+  }
+
+  private renderCheatModal(ctx: CanvasRenderingContext2D, W: number, H: number): void {
+    ctx.save();
+    ctx.fillStyle = 'rgba(8, 10, 22, 0.84)';
+    ctx.fillRect(0, 0, W, H);
+
+    const mx = 246;
+    const my = 96;
+    const mw = 468;
+    const mh = 320;
+
+    roundRect(ctx, mx, my, mw, mh, 20);
+    ctx.fillStyle = '#1b1833';
+    ctx.fill();
+    ctx.strokeStyle = '#FCA311';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 22px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🔓 BẢNG CHEAT BẾP VIỆT', W / 2 - 12, my + 32, '#ffd166');
+    ctx.font = '12.5px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText('Mẹo: Chạm 5 lần vào "Bản Đồ Bếp Việt", gõ "meow" hoặc bấm F9', W / 2, my + 60);
+
+    // Close X
+    const cb = this.cheatCloseBtn;
+    const cHover = InputManager.hitTest(this.engine.input.pointer, cb);
+    roundRect(ctx, cb.x, cb.y, cb.width, cb.height, 9);
+    ctx.fillStyle = cHover ? '#ef4444' : 'rgba(239, 68, 68, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = '#fca5a5';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.font = 'bold 18px "Segoe UI", sans-serif';
+    drawTextShadow(ctx, '✕', cb.x + cb.width / 2, cb.y + cb.height / 2, '#fff');
+
+    const pointer = this.engine.input.pointer;
+    const btns = [
+      { rect: this.cheatUnlockBtn, label: '🔓 Mở khóa hết 50 Level & 18 Món', bg: '#2d9348', hover: '#4CAF50', border: '#80ed99' },
+      { rect: this.cheatMoneyBtn, label: '💰 +5,000đ & +10 🧋 Trà Đá', bg: '#d97706', hover: '#f59e0b', border: '#fde68a' },
+      { rect: this.cheatResetBtn, label: '🔄 Reset Save về Màn 1', bg: '#991b1b', hover: '#dc2626', border: '#fca5a5' },
+    ];
+
+    for (const b of btns) {
+      const hover = InputManager.hitTest(pointer, b.rect);
+      roundRect(ctx, b.rect.x, b.rect.y, b.rect.width, b.rect.height, 12);
+      ctx.fillStyle = hover ? b.hover : b.bg;
+      ctx.fill();
+      ctx.strokeStyle = b.border;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, b.label, b.rect.x + b.rect.width / 2, b.rect.y + b.rect.height / 2, '#fff');
+    }
+
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText(
+      `Hiện tại: Level ${this.engine.save.current.currentLevel}/50  •  💰 ${formatMoney(this.engine.save.current.money)}  •  🧋 ×${this.engine.save.current.teaDrinks ?? 0}`,
+      W / 2,
+      my + mh - 20,
+    );
+
+    ctx.restore();
   }
 
   private renderEventHubModal(ctx: CanvasRenderingContext2D, W: number, H: number): void {

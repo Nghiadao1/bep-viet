@@ -3,6 +3,7 @@
 // ============================================================
 
 import type { SaveData } from '../types';
+import { RECIPES } from '../data/recipes';
 
 const SAVE_KEY = 'bep-viet-save';
 const CURRENT_VERSION = 1;
@@ -135,6 +136,24 @@ export class SaveManager {
     this.data.sloganBonusLevels = cur - 1;
     this.persist();
     return true;
+  }
+
+  /** Cheat: unlock all 50 levels, all 5 chapters, and every recipe! */
+  unlockAllLevels(): void {
+    this.data.currentLevel = 50;
+    this.data.currentChapter = 5;
+    this.data.tutorialCompleted = true;
+    const allIds = new Set(this.data.unlockedRecipes);
+    for (const r of RECIPES) allIds.add(r.id);
+    this.data.unlockedRecipes = Array.from(allIds);
+    this.persist();
+  }
+
+  /** Cheat: grant bonus gold & iced tea drinks for quick testing */
+  grantCheatResources(money = 5000, tea = 10): void {
+    this.data.money += money;
+    this.data.teaDrinks = (this.data.teaDrinks ?? 0) + tea;
+    this.persist();
   }
 
   /** Reset all save data */
