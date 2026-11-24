@@ -66,7 +66,7 @@ const DIALOGUES: Record<Exclude<TutorialStage, 'none'>, DialogueMeta> = {
     speaker: 'golden',
     name: '🐾 Mèo Vàng Phụ Bếp',
     badgeColor: '#4CAF50',
-    text: 'Ghép đủ nguyên liệu rồi!! Thêm gia vị khách muốn (tránh món bị cấm 🚫) rồi bấm nút xanh "🍽️ GIAO MÓN!" hoặc chạm thẳng vào khách nhé!',
+    text: 'Ghép đủ nguyên liệu rồi!! Thêm gia vị khách muốn (tránh món bị cấm 🚫) rồi chạm vào Đĩa xanh "🍽️ GIAO!" hoặc chạm thẳng vào khách nhé!',
     modal: false,
   },
   celebrate: {
@@ -162,6 +162,10 @@ export class TutorialSystem {
   private setStage(next: TutorialStage): void {
     this.stage = next;
     this.stageTime = 0;
+    if (next !== 'none') {
+      const sp = DIALOGUES[next].speaker;
+      this.engine.audio.playCatVoice(sp);
+    }
   }
 
   update(dt: number): void {

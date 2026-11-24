@@ -19,6 +19,9 @@ export type SfxName =
   | 'perfect'
   | 'error'
   | 'meow'
+  | 'meow_boss'
+  | 'meow_golden'
+  | 'meow_gangster'
   | 'punch'
   | 'win'
   | 'lose';
@@ -354,8 +357,22 @@ export class AudioManager {
         break;
 
       case 'meow':
-        // Cute playful cat meow pitch arc!
-        this.meowArc(t);
+        this.meowVoice(t, 580, 920, 520, 0.28, 'triangle', 0.30);
+        break;
+
+      case 'meow_boss':
+        // Dignified deeper folded-ear tabby meow for Vằn Bếp Trưởng!
+        this.meowVoice(t, 410, 620, 355, 0.27, 'triangle', 0.30);
+        break;
+
+      case 'meow_golden':
+        // Bright chirpy adorable meow for Mèo Vàng Phụ Bếp!
+        this.meowVoice(t, 740, 1180, 790, 0.22, 'sine', 0.28);
+        break;
+
+      case 'meow_gangster':
+        // Low menacing street-cat growl-meow for Đại Ca Mèo Giang Hồ!
+        this.meowVoice(t, 280, 390, 210, 0.32, 'sawtooth', 0.18);
         break;
 
       case 'punch':
@@ -409,23 +426,48 @@ export class AudioManager {
     osc.stop(startTime + duration + 0.02);
   }
 
-  private meowArc(t: number): void {
+  private meowVoice(
+    t: number,
+    fStart: number,
+    fPeak: number,
+    fEnd: number,
+    dur: number,
+    wave: OscillatorType,
+    vol: number,
+  ): void {
     if (!this.ctx || !this.sfxGain) return;
     const osc = this.ctx.createOscillator();
+    const filter = this.ctx.createBiquadFilter();
     const gain = this.ctx.createGain();
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(580, t);
-    osc.frequency.linearRampToValueAtTime(920, t + 0.11);
-    osc.frequency.exponentialRampToValueAtTime(520, t + 0.28);
+    osc.type = wave;
+    // Subtle organic vibrato-like pitch bend mimicking real cat vowel "m-e-o-w"
+    osc.frequency.setValueAtTime(fStart, t);
+    osc.frequency.linearRampToValueAtTime(fPeak, t + dur * 0.38);
+    osc.frequency.exponentialRampToValueAtTime(fEnd, t + dur);
+
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(wave === 'sawtooth' ? 1100 : 2400, t);
 
     gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.linearRampToValueAtTime(0.32, t + 0.04);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+    gain.gain.linearRampToValueAtTime(vol, t + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur + 0.02);
 
-    osc.connect(gain);
+    osc.connect(filter);
+    filter.connect(gain);
     gain.connect(this.sfxGain);
     osc.start(t);
-    osc.stop(t + 0.32);
+    osc.stop(t + dur + 0.04);
+  }
+
+  /** Helper: play matching cat character voice whenever a cat speaks! */
+  playCatVoice(speaker: 'boss' | 'golden' | 'both' | 'gangster'): void {
+    if (speaker === 'boss') this.playSfx('meow_boss');
+    else if (speaker === 'golden') this.playSfx('meow_golden');
+    else if (speaker === 'gangster') this.playSfx('meow_gangster');
+    else {
+      this.playSfx('meow_boss');
+      window.setTimeout(() => this.playSfx('meow_golden'), 130);
+    }
   }
 
   private noiseBurst(

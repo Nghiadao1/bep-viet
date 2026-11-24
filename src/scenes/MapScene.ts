@@ -15,6 +15,12 @@ import { StoryScene } from './StoryScene';
 import { ShopScene } from './ShopScene';
 import { MarketRunnerScene } from './MarketRunnerScene';
 import { GangsterBattleScene } from './GangsterBattleScene';
+import { MazeEscapeScene } from './events/MazeEscapeScene';
+import { WordSignScene } from './events/WordSignScene';
+import { FishingMinerScene } from './events/FishingMinerScene';
+import { DishCatchScene } from './events/DishCatchScene';
+import { TowerBuildScene } from './events/TowerBuildScene';
+import { TienLenScene } from './events/TienLenScene';
 import { formatMoney } from '../utils/math';
 
 // Accurate geographic coastline waypoints [lon, lat] of Mainland Vietnam (clockwise from Hà Giang)
@@ -157,11 +163,22 @@ export class MapScene implements Scene {
   private pinHitRects: { chapterIdx: number; rect: Rect; pos: Vec2 }[] = [];
   private levelRects: Rect[] = [];
   private backBtn: Rect = { x: 18, y: 12, width: 108, height: 42 };
-  private marketBtn: Rect = { x: 356, y: 12, width: 130, height: 42 };
-  private gangsterBtn: Rect = { x: 494, y: 12, width: 142, height: 42 };
+  private eventHubBtn: Rect = { x: 404, y: 12, width: 176, height: 42 };
   private storyBtn: Rect = { x: 760, y: 98, width: 164, height: 34 };
-  private shopBtn: Rect = { x: 644, y: 12, width: 158, height: 42 };
-  private tutorialBtn: Rect = { x: 810, y: 12, width: 132, height: 42 };
+  private shopBtn: Rect = { x: 588, y: 12, width: 204, height: 42 };
+  private tutorialBtn: Rect = { x: 800, y: 12, width: 142, height: 42 };
+
+  // 8-Card Mini Game & Event Hub Modal State
+  private eventHubOpen = false;
+  private eventHubCloseBtn: Rect = { x: 834, y: 60, width: 42, height: 42 };
+  private eventCards: Array<{
+    id: string;
+    icon: string;
+    title: string;
+    desc: string;
+    color: string;
+    rect: Rect;
+  }> = [];
 
   // Cached projected polygons + offscreen static map canvas (huge mobile FPS win!)
   private mainlandPts: Vec2[] = [];
@@ -198,7 +215,60 @@ export class MapScene implements Scene {
       };
     });
 
+    // Build 2x4 grid of all 8 Event & Side Minigames inside the Event Hub Modal!
+    this.eventHubOpen = false;
+    const cardSpecs = [
+      { id: 'market', icon: '🏃', title: 'Chạy Chợ Khẩn Cấp', desc: 'Subway Surfers né chướng ngại lấy nguyên liệu!', color: '#38BDF8' },
+      { id: 'gangster', icon: '🥊', title: 'Đuổi Mèo Giang Hồ', desc: 'Oẳn Tù Tì luân phiên bảo vệ tiền quán!', color: '#E63946' },
+      { id: 'maze', icon: '🧭', title: 'Mê Cung Chuyển Quán', desc: '4 nút điều hướng đẩy xe thoát hẻm Sài Gòn!', color: '#F59E0B' },
+      { id: 'word', icon: '🔤', title: 'Ghép Biển Hiệu', desc: 'Chọn chữ trôi nổi làm Slogan +20% Tips!', color: '#A855F7' },
+      { id: 'fishing', icon: '🎣', title: 'Câu Cá Nghỉ Trưa', desc: 'Đào Vàng câu cá & Trà Đá tăng kiên nhẫn!', color: '#0EA5E9' },
+      { id: 'dish', icon: '🫧', title: 'Rửa Bát Hứng Đồ', desc: 'Hứng bát & bọt biển, né gạch đá vỡ!', color: '#10B981' },
+      { id: 'tower', icon: '🏗️', title: 'Xây Nhà Hàng Mới', desc: 'Canh thả dây cẩu xây nhà hàng 5 tầng!', color: '#F97316' },
+      { id: 'tienlen', icon: '🃏', title: 'Tiến Lên Miền Nam', desc: 'Đánh bài cùng Vằn — thua là Vằn cay cú!', color: '#22C55E' },
+    ];
+    const cw = 186;
+    const ch = 158;
+    const gapX = 14;
+    const gapY = 16;
+    const gridW = 4 * cw + 3 * gapX;
+    const gx = (960 - gridW) / 2;
+    const gy = 132;
+    this.eventCards = cardSpecs.map((spec, idx) => {
+      const col = idx % 4;
+      const row = Math.floor(idx / 4);
+      return {
+        ...spec,
+        rect: {
+          x: gx + col * (cw + gapX),
+          y: gy + row * (ch + gapY),
+          width: cw,
+          height: ch,
+        },
+      };
+    });
+
     this.removeClick = this.engine.input.onClick((pos) => {
+      // If 8-Card Mini Game Event Hub modal is open, consume clicks here!
+      if (this.eventHubOpen) {
+        if (InputManager.hitTest(pos, this.eventHubCloseBtn, 8)) {
+          this.engine.audio.playSfx('click');
+          this.eventHubOpen = false;
+          return;
+        }
+        for (const card of this.eventCards) {
+          if (InputManager.hitTest(pos, card.rect, 4)) {
+            this.launchEventMinigame(card.id);
+            return;
+          }
+        }
+        if (pos.x < 68 || pos.x > 892 || pos.y < 48 || pos.y > 498) {
+          this.engine.audio.playSfx('click');
+          this.eventHubOpen = false;
+        }
+        return;
+      }
+
       // Back to Menu
       if (InputManager.hitTest(pos, this.backBtn, 6)) {
         this.engine.audio.playSfx('click');
@@ -206,26 +276,11 @@ export class MapScene implements Scene {
         return;
       }
 
-      // Quick-play Emergency Market Runner (Subway Surfers dash)!
-      if (InputManager.hitTest(pos, this.marketBtn, 6)) {
-        this.engine.audio.playSfx('click');
-        this.engine.scenes.replace(
-          new MarketRunnerScene(this.engine, (bonusStock) => {
-            const cur = this.engine.save.current.currentLevel;
-            this.engine.scenes.replace(new GameScene(this.engine, cur, false, bonusStock));
-          }),
-        );
-        return;
-      }
-
-      // Quick-play Gangster Cat Defense (Rock-Paper-Scissors brawl)!
-      if (InputManager.hitTest(pos, this.gangsterBtn, 6)) {
-        this.engine.audio.playSfx('punch');
-        this.engine.scenes.replace(
-          new GangsterBattleScene(this.engine, () => {
-            this.engine.scenes.replace(new MapScene(this.engine));
-          }),
-        );
+      // Open 8-Card Mini Game & Event Hub!
+      if (InputManager.hitTest(pos, this.eventHubBtn, 6)) {
+        this.engine.audio.playSfx('pop');
+        this.engine.audio.playCatVoice('golden');
+        this.eventHubOpen = true;
         return;
       }
 
@@ -238,7 +293,7 @@ export class MapScene implements Scene {
 
       // Replay tutorial in Level 1
       if (InputManager.hitTest(pos, this.tutorialBtn, 6)) {
-        this.engine.audio.playSfx('meow');
+        this.engine.audio.playCatVoice('boss');
         this.engine.scenes.replace(new GameScene(this.engine, 1, true));
         return;
       }
@@ -260,6 +315,8 @@ export class MapScene implements Scene {
         if (InputManager.hitTest(pos, pin.rect, 6)) {
           this.engine.audio.playSfx('pop');
           this.selectedChapterIdx = pin.chapterIdx;
+          const pinSpec = CHAPTER_PINS.find((p) => p.chapterId === CHAPTERS[pin.chapterIdx].id);
+          if (pinSpec) this.engine.audio.playCatVoice(pinSpec.catSpeaker);
           return;
         }
       }
@@ -294,6 +351,57 @@ export class MapScene implements Scene {
     });
   }
 
+  private launchEventMinigame(id: string): void {
+    this.eventHubOpen = false;
+    this.engine.audio.playSfx('click');
+    const backToMap = (): void => {
+      this.engine.scenes.replace(new MapScene(this.engine));
+    };
+
+    switch (id) {
+      case 'market':
+        this.engine.scenes.replace(
+          new MarketRunnerScene(this.engine, (bonusStock) => {
+            const cur = this.engine.save.current.currentLevel;
+            this.engine.scenes.replace(new GameScene(this.engine, cur, false, bonusStock));
+          }),
+        );
+        break;
+      case 'gangster':
+        this.engine.scenes.replace(new GangsterBattleScene(this.engine, backToMap));
+        break;
+      case 'maze': {
+        const ch = CHAPTERS[this.selectedChapterIdx] ?? CHAPTERS[0];
+        this.engine.scenes.replace(new MazeEscapeScene(this.engine, ch.name, backToMap));
+        break;
+      }
+      case 'word':
+        this.engine.scenes.replace(new WordSignScene(this.engine, backToMap));
+        break;
+      case 'fishing':
+        this.engine.scenes.replace(new FishingMinerScene(this.engine, backToMap));
+        break;
+      case 'dish':
+        this.engine.scenes.replace(new DishCatchScene(this.engine, backToMap));
+        break;
+      case 'tower':
+        this.engine.scenes.replace(new TowerBuildScene(this.engine, 'Nhà Hàng Bếp Việt Mới', backToMap));
+        break;
+      case 'tienlen':
+        this.engine.scenes.replace(
+          new TienLenScene(this.engine, (delayPenaltySec) => {
+            if (delayPenaltySec > 0) {
+              const cur = this.engine.save.current.currentLevel;
+              this.engine.scenes.replace(new GameScene(this.engine, cur, false, 0, delayPenaltySec));
+            } else {
+              backToMap();
+            }
+          }),
+        );
+        break;
+    }
+  }
+
   exit(): void {
     this.removeClick?.();
     this.removeClick = undefined;
@@ -322,9 +430,124 @@ export class MapScene implements Scene {
 
     // Right panel: Selected Region & 10 Levels + Cat NPC guide
     this.renderLevelPanel(ctx);
+
+    // Optional 8-Card Mini Game & Event Hub Modal Overlay!
+    if (this.eventHubOpen) {
+      this.renderEventHubModal(ctx, W, H);
+    }
   }
 
-  private renderHeader(ctx: CanvasRenderingContext2D, W: number): void {
+  private renderEventHubModal(ctx: CanvasRenderingContext2D, W: number, H: number): void {
+    ctx.save();
+    ctx.fillStyle = 'rgba(8, 10, 22, 0.84)';
+    ctx.fillRect(0, 0, W, H);
+
+    const mx = 68;
+    const my = 46;
+    const mw = W - 136;
+    const mh = H - 92;
+
+    roundRect(ctx, mx, my, mw, mh, 20);
+    ctx.fillStyle = '#181830';
+    ctx.fill();
+    ctx.strokeStyle = '#FCA311';
+    ctx.lineWidth = 3;
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 23px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🎪 TRUNG TÂM MINI GAME & SỰ KIỆN BẾP VIỆT (8 TRÒ CHƠI)', W / 2 - 14, my + 32, '#ffd166');
+    ctx.font = '13px "Segoe UI", system-ui, sans-serif';
+    ctx.fillStyle = '#cbd5e1';
+    ctx.fillText(
+      `Tự động xuất hiện giữa các màn hoặc chọn chơi ngay!  •  🧋 Trà Đá hiện có: ×${this.engine.save.current.teaDrinks ?? 0}`,
+      W / 2 - 14,
+      my + 60,
+    );
+
+    const cb = this.eventHubCloseBtn;
+    const cHover = InputManager.hitTest(this.engine.input.pointer, cb);
+    roundRect(ctx, cb.x, cb.y, cb.width, cb.height, 10);
+    ctx.fillStyle = cHover ? '#ef4444' : 'rgba(239, 68, 68, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = '#fca5a5';
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+    ctx.font = 'bold 20px "Segoe UI", sans-serif';
+    drawTextShadow(ctx, '✕', cb.x + cb.width / 2, cb.y + cb.height / 2, '#fff');
+
+    const pointer = this.engine.input.pointer;
+    for (const card of this.eventCards) {
+      const r = card.rect;
+      const hover = InputManager.hitTest(pointer, r);
+      roundRect(ctx, r.x, r.y + 3, r.width, r.height, 14);
+      ctx.fillStyle = 'rgba(0,0,0,0.34)';
+      ctx.fill();
+
+      roundRect(ctx, r.x, r.y, r.width, r.height, 14);
+      ctx.fillStyle = hover ? 'rgba(42, 42, 74, 0.98)' : 'rgba(26, 26, 48, 0.95)';
+      ctx.fill();
+      ctx.strokeStyle = hover ? '#ffd166' : card.color;
+      ctx.lineWidth = hover ? 2.8 : 1.8;
+      ctx.stroke();
+
+      roundRect(ctx, r.x + r.width / 2 - 26, r.y + 12, 52, 46, 12);
+      ctx.fillStyle = `${card.color}33`;
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = '28px "Segoe UI"';
+      ctx.fillText(card.icon, r.x + r.width / 2, r.y + 36);
+
+      ctx.font = 'bold 13.5px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, card.title, r.x + r.width / 2, r.y + 74, '#fff');
+
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'top';
+      ctx.font = '11.5px "Segoe UI", system-ui, sans-serif';
+      ctx.fillStyle = '#cbd5e1';
+      this.wrapTextCentered(ctx, card.desc, r.x + r.width / 2, r.y + 88, r.width - 18, 15);
+
+      roundRect(ctx, r.x + 28, r.y + r.height - 28, r.width - 56, 22, 8);
+      ctx.fillStyle = hover ? card.color : `${card.color}99`;
+      ctx.fill();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = 'bold 11.5px "Segoe UI", sans-serif';
+      ctx.fillStyle = '#fff';
+      ctx.fillText('▶ CHƠI NGAY', r.x + r.width / 2, r.y + r.height - 17);
+    }
+
+    ctx.restore();
+  }
+
+  private wrapTextCentered(
+    ctx: CanvasRenderingContext2D,
+    text: string,
+    cx: number,
+    y: number,
+    maxWidth: number,
+    lineHeight: number,
+  ): void {
+    const words = text.split(' ');
+    let line = '';
+    let cy = y;
+    for (const word of words) {
+      const test = line + word + ' ';
+      if (ctx.measureText(test).width > maxWidth && line) {
+        ctx.fillText(line.trim(), cx, cy);
+        line = word + ' ';
+        cy += lineHeight;
+      } else {
+        line = test;
+      }
+    }
+    if (line.trim()) ctx.fillText(line.trim(), cx, cy);
+  }
+
+  private renderHeader(ctx: CanvasRenderingContext2D, _W: number): void {
     // Back button
     const backHover = InputManager.hitTest(this.engine.input.pointer, this.backBtn);
     roundRect(ctx, this.backBtn.x, this.backBtn.y, this.backBtn.width, this.backBtn.height, 10);
@@ -346,29 +569,24 @@ export class MapScene implements Scene {
 
     // Title
     ctx.font = 'bold 21px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, '🗺 Bản Đồ Bếp Việt', 240, 33, '#FCA311');
+    drawTextShadow(ctx, '🗺 Bản Đồ Bếp Việt', 262, 33, '#FCA311');
 
-    // Quick-play Event 1: Emergency Market Runner
-    const mktHover = InputManager.hitTest(this.engine.input.pointer, this.marketBtn);
-    roundRect(ctx, this.marketBtn.x, this.marketBtn.y, this.marketBtn.width, this.marketBtn.height, 10);
-    ctx.fillStyle = mktHover ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.18)';
+    // 8-Card Mini Game Event Hub Button!
+    const hubHover = InputManager.hitTest(this.engine.input.pointer, this.eventHubBtn);
+    roundRect(ctx, this.eventHubBtn.x, this.eventHubBtn.y, this.eventHubBtn.width, this.eventHubBtn.height, 10);
+    ctx.fillStyle = hubHover ? 'rgba(168, 85, 247, 0.48)' : 'rgba(168, 85, 247, 0.25)';
     ctx.fill();
-    ctx.strokeStyle = '#38BDF8';
-    ctx.lineWidth = 1.5;
+    ctx.strokeStyle = '#c084fc';
+    ctx.lineWidth = 1.8;
     ctx.stroke();
-    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, '🏃 Chạy Chợ', this.marketBtn.x + this.marketBtn.width / 2, this.marketBtn.y + this.marketBtn.height / 2, '#7dd3fc');
-
-    // Quick-play Event 2: Defend Stall vs Gangster Cat!
-    const gngHover = InputManager.hitTest(this.engine.input.pointer, this.gangsterBtn);
-    roundRect(ctx, this.gangsterBtn.x, this.gangsterBtn.y, this.gangsterBtn.width, this.gangsterBtn.height, 10);
-    ctx.fillStyle = gngHover ? 'rgba(230, 57, 70, 0.42)' : 'rgba(230, 57, 70, 0.22)';
-    ctx.fill();
-    ctx.strokeStyle = '#E63946';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, '🥊 Đuổi Giang Hồ', this.gangsterBtn.x + this.gangsterBtn.width / 2, this.gangsterBtn.y + this.gangsterBtn.height / 2, '#fca5a5');
+    ctx.font = 'bold 14px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(
+      ctx,
+      '🎪 Mini Game (8)',
+      this.eventHubBtn.x + this.eventHubBtn.width / 2,
+      this.eventHubBtn.y + this.eventHubBtn.height / 2,
+      '#f5d0fe',
+    );
 
     // Upgrade Shop button with current money!
     const shopHover = InputManager.hitTest(this.engine.input.pointer, this.shopBtn);

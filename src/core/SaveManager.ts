@@ -19,6 +19,8 @@ function createDefaultSave(): SaveData {
     unlockedRecipes: ['pho_bo'],
     tutorialCompleted: false,
     seenChapters: [],
+    teaDrinks: 2, // Start with 2 complimentary cups of iced tea so players can try patience boost!
+    sloganBonusLevels: 0,
     settings: {
       musicVolume: 0.5,
       sfxVolume: 0.7,
@@ -104,6 +106,35 @@ export class SaveManager {
   /** Get upgrade level */
   getUpgradeLevel(upgradeId: string): number {
     return this.data.upgrades[upgradeId] ?? 0;
+  }
+
+  /** Add patience-restoring iced tea / soda items won from Fishing! */
+  addTeaDrinks(count: number): void {
+    this.data.teaDrinks = (this.data.teaDrinks ?? 0) + count;
+    this.persist();
+  }
+
+  /** Consume 1 iced tea / soda drink to calm an impatient customer */
+  useTeaDrink(): boolean {
+    const cur = this.data.teaDrinks ?? 0;
+    if (cur <= 0) return false;
+    this.data.teaDrinks = cur - 1;
+    this.persist();
+    return true;
+  }
+
+  /** Add glowing signboard marketing bonus shifts */
+  addSloganBonus(shifts = 2): void {
+    this.data.sloganBonusLevels = (this.data.sloganBonusLevels ?? 0) + shifts;
+    this.persist();
+  }
+
+  consumeSloganBonus(): boolean {
+    const cur = this.data.sloganBonusLevels ?? 0;
+    if (cur <= 0) return false;
+    this.data.sloganBonusLevels = cur - 1;
+    this.persist();
+    return true;
   }
 
   /** Reset all save data */

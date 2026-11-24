@@ -65,7 +65,12 @@ export class StoryScene implements Scene {
       if (this.lineIndex < this.story.lines.length - 1) {
         this.lineIndex++;
         this.lineElapsed = 0;
-        this.engine.audio.playSfx('pop');
+        const nextSpeaker = this.story.lines[this.lineIndex]?.speaker;
+        if (nextSpeaker === 'boss' || nextSpeaker === 'golden' || nextSpeaker === 'both') {
+          this.engine.audio.playCatVoice(nextSpeaker);
+        } else {
+          this.engine.audio.playSfx('pop');
+        }
       } else {
         this.engine.audio.playSfx('click');
         this.onComplete();

@@ -44,6 +44,7 @@ export class CatCompanionSystem {
   private elapsed = 0;
   private bounceBoss = 0;
   private bounceGolden = 0;
+  private lastVoiceTime = 0;
   private hearts: FloatingHeart[] = [];
 
   // Dedicated Cat Kitchen Booth on the right side of the wooden counter!
@@ -53,7 +54,7 @@ export class CatCompanionSystem {
     this.engine = engine;
   }
 
-  /** Make either cat (or both) react immediately with a speech bubble */
+  /** Make either cat (or both) react immediately with a speech bubble + expressive Meow voice! */
   say(speaker: CatSpeaker, text: string, duration = 4.2): void {
     this.speaker = speaker;
     this.message = text;
@@ -61,6 +62,12 @@ export class CatCompanionSystem {
     this.idleTimer = 11.0;
     if (speaker === 'boss' || speaker === 'both') this.bounceBoss = 0.45;
     if (speaker === 'golden' || speaker === 'both') this.bounceGolden = 0.45;
+
+    const now = performance.now();
+    if (now - this.lastVoiceTime >= 1100) {
+      this.lastVoiceTime = now;
+      this.engine.audio.playCatVoice(speaker);
+    }
   }
 
   /** Handle tapping the cats for cute meow encouragement & floating hearts! */

@@ -11,6 +11,7 @@ import { formatMoney } from '../utils/math';
 import { ParticleSystem } from '../systems/ParticleSystem';
 import { MapScene } from './MapScene';
 import { MenuScene } from './MenuScene';
+import { TowerBuildScene } from './events/TowerBuildScene';
 
 export interface ShopItem {
   id: string;
@@ -186,6 +187,7 @@ export class ShopScene implements Scene {
 
   enter(): void {
     this.engine.input.clear();
+    this.engine.audio.playCatVoice('golden');
     this.elapsed = 0;
     this.particles.clear();
 
@@ -239,6 +241,19 @@ export class ShopScene implements Scene {
 
     this.engine.save.buyUpgrade(item.id);
     this.engine.audio.playSfx('perfect');
+    this.engine.audio.playCatVoice('golden');
+
+    // Expanding the restaurant triggers the Tower-Bloxx Restaurant Builder minigame!
+    if (item.id === 'mo_rong_quan') {
+      const upgradedStall = getStallTier(this.engine.save.current);
+      this.engine.scenes.replace(
+        new TowerBuildScene(this.engine, upgradedStall.name, () => {
+          this.engine.scenes.replace(new ShopScene(this.engine, this.returnTo));
+        }),
+      );
+      return;
+    }
+
     this.particles.emitStarburst(rect.x + rect.width / 2, rect.y + rect.height / 2, '#ffd166', 24);
     this.particles.emitFloatingText(
       rect.x + rect.width / 2,
@@ -374,6 +389,7 @@ export class ShopScene implements Scene {
       roundRect(ctx, listX + 10, y + 9, 48, 48, 10);
       ctx.fillStyle = `${item.color}33`;
       ctx.fill();
+      ctx.fillStyle = '#fff';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.font = '25px "Segoe UI"';

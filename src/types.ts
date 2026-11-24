@@ -136,6 +136,8 @@ export interface SaveData {
   unlockedRecipes: string[];
   tutorialCompleted: boolean;
   seenChapters: number[];
+  teaDrinks?: number;          // Patience-boosting tea/soda bottles won from Fishing minigame!
+  sloganBonusLevels?: number;  // Bonus tip rounds earned from Signboard Word minigame!
   settings: GameSettings;
   stats: PlayerStats;
 }

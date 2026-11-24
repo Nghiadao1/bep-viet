@@ -73,7 +73,7 @@ export class GangsterBattleScene implements Scene {
   enter(): void {
     this.engine.input.clear();
     this.engine.audio.playBgm('action');
-    this.engine.audio.playSfx('meow');
+    this.engine.audio.playCatVoice('gangster');
     this.phase = 'intro';
     this.elapsed = 0;
     this.phaseTimer = 0;
@@ -228,6 +228,7 @@ export class GangsterBattleScene implements Scene {
         // Next round: TAG-TEAM SWAP between Vằn Bếp Trưởng & Mèo Vàng!
         this.roundNumber++;
         this.activeHero = this.activeHero === 'boss' ? 'golden' : 'boss';
+        this.engine.audio.playCatVoice(this.activeHero);
         this.playerMove = null;
         this.gangsterMove = null;
         this.roundWinner = null;
