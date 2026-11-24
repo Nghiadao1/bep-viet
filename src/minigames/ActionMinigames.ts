@@ -9,7 +9,7 @@
 import type { Rect, Vec2 } from '../types';
 import { InputManager } from '../core/InputManager';
 import { roundRect, drawTextShadow, drawProgressBar } from '../utils/draw';
-import { clamp, lerp } from '../utils/math';
+import { clamp, lerp, randFloat } from '../utils/math';
 import {
   BOARD_RECT,
   gradeFromScore,
@@ -42,10 +42,13 @@ export class FirePumpMinigame implements CookingMinigame {
   private holding = false;
   private flameBurst = 0;
   private coolRate: number;
+  private sweetHalf: number;
   private sweetMin: number;
   private sweetMax: number;
+  private driftSpeed: number;
+  private driftAmp: number;
   private boilDuration: number;
-  private catQuote = 'Chạm nút THỔI LỬA liên tục để nước sôi chuẩn vị nào!';
+  private catQuote = 'Vùng sôi đang dịch chuyển! Chạm giữ THỔI LỬA bám theo vùng xanh nhé!';
 
   private pumpBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
 
@@ -53,10 +56,13 @@ export class FirePumpMinigame implements CookingMinigame {
     this.ctx = ctx;
     this.title = `🔥 ${ctx.step.action} — ${ctx.recipe.name}`;
     const d = clamp(ctx.difficulty, 0, 1);
-    this.coolRate = lerp(20, 32, d);
-    this.sweetMin = lerp(46, 56, d);
-    this.sweetMax = lerp(84, 75, d);
-    this.boilDuration = lerp(1.4, 2.0, d);
+    this.coolRate = lerp(23, 36, d);
+    this.sweetHalf = lerp(15, 9.5, d);
+    this.driftSpeed = lerp(1.15, 2.35, d);
+    this.driftAmp = lerp(11, 18, d);
+    this.sweetMin = 62 - this.sweetHalf;
+    this.sweetMax = 62 + this.sweetHalf;
+    this.boilDuration = lerp(1.55, 2.15, d);
   }
 
   onDown(pos: Vec2): void {
@@ -84,6 +90,11 @@ export class FirePumpMinigame implements CookingMinigame {
       if (this.finishTimer >= 0.48) this.done = true;
       return;
     }
+
+    // Dynamic shifting boiling sweet-spot! Player must actively follow the moving green band!
+    const sweetCenter = 60 + Math.sin(this.elapsed * this.driftSpeed) * this.driftAmp;
+    this.sweetMin = clamp(sweetCenter - this.sweetHalf, 24, 80);
+    this.sweetMax = clamp(sweetCenter + this.sweetHalf, 42, 92);
 
     // Holding gently pumps fire; releasing cools pot down (faster cooling at higher levels)
     if (this.holding) {
@@ -266,24 +277,26 @@ export class TimingCutMinigame implements CookingMinigame {
   private cursor = 0;         // 0..1 oscillating
   private dir = 1;
   private speed: number;
+  private targetCenter = 0.5; // Shifts to a brand-new position after EVERY cut!
   private targetCuts: number;
   private perfectTol: number;
   private goodTol: number;
   private hits: number[] = [];
   private popups: Array<{ text: string; color: string; y: number; alpha: number }> = [];
-  private catQuote = 'Canh kim chạy vô giữa vùng xanh rồi bấm CẮT ngay nha!';
+  private catQuote = 'Mục tiêu xanh sẽ ĐỔI VỊ TRÍ liên tục sau mỗi nhát cắt! Nhanh mắt lên nha!';
 
   private cutBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
 
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
     const d = clamp(ctx.difficulty, 0, 1);
-    this.targetCuts = d > 0.55 ? 4 : 3;
-    this.speed = lerp(0.95, 1.75, d);
-    this.perfectTol = lerp(0.11, 0.065, d);
-    this.goodTol = lerp(0.22, 0.145, d);
+    this.targetCuts = d > 0.45 ? 4 : 3;
+    this.speed = lerp(1.05, 1.85, d);
+    this.perfectTol = lerp(0.105, 0.06, d);
+    this.goodTol = lerp(0.205, 0.135, d);
+    this.targetCenter = randFloat(0.28, 0.72);
     this.title = `⏱️ ${ctx.step.action} — ${ctx.recipe.name}`;
-    this.instruction = `Bấm đúng lúc kim đi vào vùng xanh (${this.targetCuts} lần)!`;
+    this.instruction = `Vùng xanh đổi vị trí liên tục — canh cắt chuẩn (${this.targetCuts} lần)!`;
   }
 
   onDown(pos: Vec2): void {
@@ -294,7 +307,7 @@ export class TimingCutMinigame implements CookingMinigame {
   }
 
   private performCut(): void {
-    const dist = Math.abs(this.cursor - 0.5);
+    const dist = Math.abs(this.cursor - this.targetCenter);
     let hitScore: number;
     let label: string;
     let color: string;
@@ -305,24 +318,31 @@ export class TimingCutMinigame implements CookingMinigame {
       label = '⭐ HOÀN HẢO!';
       color = '#4CAF50';
       this.ctx.particles.emitStarburst(cx, 205, '#ffd166', 14);
-      this.catQuote = 'Nhát cắt chuẩn như máy luôn!! Tiếp nào anh/chị ơi! ✨';
+      this.catQuote = 'Nhát cắt chuẩn như máy luôn!! Mục tiêu vừa nhảy sang chỗ mới kìa! ✨';
     } else if (dist <= this.goodTol) {
       hitScore = 78;
       label = '👍 CHUẨN RỒI!';
       color = '#FCA311';
       this.ctx.particles.emitSliceSparks(cx, 205, '#fff3b0', 10);
-      this.catQuote = 'Ngon lành! Cố canh sát tâm xanh hơn chút nữa nhé!';
+      this.catQuote = 'Ngon lành! Cẩn thận mục tiêu vừa đổi vị trí mới đó nhé!';
     } else {
       hitScore = 45;
       label = '😅 HƠI LỆCH!';
       color = '#E63946';
       this.ctx.particles.shake(4, 0.14);
-      this.catQuote = 'Ối sợi phở hơi to xíu! Bình tĩnh canh nhịp lại nha~';
+      this.catQuote = 'Ối trượt mục tiêu rồi! Canh theo vùng xanh vừa dịch chuyển lại nha~';
     }
 
     this.hits.push(hitScore);
     this.popups.push({ text: label, color, y: 245, alpha: 1 });
-    this.speed += lerp(0.12, 0.22, this.ctx.difficulty);
+    this.speed += lerp(0.14, 0.24, this.ctx.difficulty);
+
+    // Jump targetCenter to a fresh distant location so player can't blindly memorize!
+    let nextCenter = randFloat(0.22, 0.78);
+    if (Math.abs(nextCenter - this.targetCenter) < 0.18) {
+      nextCenter = this.targetCenter < 0.5 ? randFloat(0.58, 0.78) : randFloat(0.22, 0.42);
+    }
+    this.targetCenter = nextCenter;
 
     if (this.hits.length >= this.targetCuts) {
       const avg = Math.round(this.hits.reduce((a, b) => a + b, 0) / this.hits.length);
@@ -441,14 +461,18 @@ export class TimingCutMinigame implements CookingMinigame {
     ctx.fillStyle = '#1e293b';
     ctx.fill();
 
-    // Dynamic Good & Perfect zones scaled smoothly by difficulty!
+    // Dynamic Shifting Good & Perfect zones!
+    const gLeft = clamp(this.targetCenter - this.goodTol, 0, 1);
+    const gRight = clamp(this.targetCenter + this.goodTol, 0, 1);
+    const pLeft = clamp(this.targetCenter - this.perfectTol, 0, 1);
+    const pRight = clamp(this.targetCenter + this.perfectTol, 0, 1);
     ctx.save();
     roundRect(ctx, barX, barY, barW, barH, 12);
     ctx.clip();
     ctx.fillStyle = 'rgba(252, 163, 17, 0.35)';
-    ctx.fillRect(barX + barW * (0.5 - this.goodTol), barY, barW * (this.goodTol * 2), barH);
+    ctx.fillRect(barX + barW * gLeft, barY, barW * (gRight - gLeft), barH);
     ctx.fillStyle = '#4CAF50';
-    ctx.fillRect(barX + barW * (0.5 - this.perfectTol), barY, barW * (this.perfectTol * 2), barH);
+    ctx.fillRect(barX + barW * pLeft, barY, barW * (pRight - pLeft), barH);
     ctx.restore();
 
     roundRect(ctx, barX, barY, barW, barH, 12);
@@ -553,27 +577,45 @@ export class SliceLineMinigame implements CookingMinigame {
       ];
       this.instruction = 'Kéo dao từ chấm xanh sang đỏ để xẻ đôi ổ bánh mì!';
     } else {
-      // Smoothly scales from 2 cuts (early levels) -> 3 cuts (mid) -> 4 precision cuts (late)!
-      const lineCount = d < 0.15 ? 2 : d > 0.65 ? 4 : 3;
-      this.instruction = `Kéo dao dọc theo ${lineCount} đường kẻ để thái lát thịt đều!`;
-      if (lineCount === 2) {
-        this.lines = [
-          { x1: cx - 60, y1: 175, x2: cx - 40, y2: 355, completed: false, score: 0 },
-          { x1: cx + 40, y1: 175, x2: cx + 60, y2: 355, completed: false, score: 0 },
-        ];
-      } else if (lineCount === 4) {
-        this.lines = [
-          { x1: cx - 115, y1: 175, x2: cx - 98, y2: 355, completed: false, score: 0 },
-          { x1: cx - 42, y1: 175, x2: cx - 25, y2: 355, completed: false, score: 0 },
-          { x1: cx + 28, y1: 175, x2: cx + 45, y2: 355, completed: false, score: 0 },
-          { x1: cx + 98, y1: 175, x2: cx + 115, y2: 355, completed: false, score: 0 },
-        ];
-      } else {
-        this.lines = [
-          { x1: cx - 95, y1: 175, x2: cx - 75, y2: 355, completed: false, score: 0 },
-          { x1: cx - 10, y1: 175, x2: cx + 10, y2: 355, completed: false, score: 0 },
-          { x1: cx + 75, y1: 175, x2: cx + 95, y2: 355, completed: false, score: 0 },
-        ];
+      // Dynamic randomized butcher slice angles & positions so cuts never repeat!
+      const lineCount = d < 0.12 ? 3 : d > 0.55 ? 4 : 3;
+      this.instruction = `Đường cắt đổi góc liên tục! Kéo theo ${lineCount} đường kẻ để thái thịt!`;
+      this.lines = [];
+      for (let i = 0; i < lineCount; i++) {
+        const mode = (i + Math.floor(Math.random() * 3)) % 3;
+        const offsetX = -105 + (i / Math.max(1, lineCount - 1)) * 210 + randFloat(-14, 14);
+        if (mode === 0) {
+          // Angled right slant
+          this.lines.push({
+            x1: cx + offsetX - 24,
+            y1: 174,
+            x2: cx + offsetX + 26,
+            y2: 356,
+            completed: false,
+            score: 0,
+          });
+        } else if (mode === 1) {
+          // Angled left slant
+          this.lines.push({
+            x1: cx + offsetX + 26,
+            y1: 174,
+            x2: cx + offsetX - 24,
+            y2: 356,
+            completed: false,
+            score: 0,
+          });
+        } else {
+          // Cross horizontal/diagonal fillet cut!
+          const yOff = randFloat(-32, 32);
+          this.lines.push({
+            x1: cx - 135,
+            y1: 266 + yOff - 18,
+            x2: cx + 135,
+            y2: 266 + yOff + 18,
+            completed: false,
+            score: 0,
+          });
+        }
       }
     }
   }
@@ -871,11 +913,12 @@ export class GrillFlipMinigame implements CookingMinigame {
   private side = 1;            // 1 or 2
   private cook = 0;            // 0..1
   private searSpeed: number;
-  private sweetMin: number;
-  private sweetMax: number;
+  private sweetHalf: number;
+  private sweetMin = 0.56;
+  private sweetMax = 0.86;
   private sideScores: number[] = [];
   private flipAnim = 0;        // jump animation when flipping
-  private catQuote = 'Nghe tiếng xèo xèo chưa? Canh kim vào vùng vàng ươm rồi lật nha!';
+  private catQuote = 'Mỗi mặt nướng có vùng vàng riêng! Canh đúng vùng xanh rồi lật liền nha!';
 
   private flipBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
 
@@ -883,9 +926,15 @@ export class GrillFlipMinigame implements CookingMinigame {
     this.ctx = ctx;
     this.title = `🔥 ${ctx.step.action} — ${ctx.recipe.name}`;
     const d = clamp(ctx.difficulty, 0, 1);
-    this.searSpeed = lerp(0.45, 0.82, d);
-    this.sweetMin = lerp(0.56, 0.66, d);
-    this.sweetMax = lerp(0.88, 0.82, d);
+    this.searSpeed = lerp(0.48, 0.86, d);
+    this.sweetHalf = lerp(0.145, 0.08, d);
+    this.rollSweetZone();
+  }
+
+  private rollSweetZone(): void {
+    const center = this.side === 1 ? randFloat(0.56, 0.76) : randFloat(0.48, 0.80);
+    this.sweetMin = clamp(center - this.sweetHalf, 0.34, 0.78);
+    this.sweetMax = clamp(center + this.sweetHalf, 0.52, 0.92);
   }
 
   onDown(pos: Vec2): void {
@@ -920,6 +969,7 @@ export class GrillFlipMinigame implements CookingMinigame {
       this.side = 2;
       this.cook = 0;
       this.flipAnim = 0.3;
+      this.rollSweetZone(); // Fresh shifted target for Side 2!
     } else {
       const avg = Math.round((this.sideScores[0] + this.sideScores[1]) / 2);
       const grade = gradeFromScore(avg);

@@ -516,21 +516,23 @@ export class WokTossMinigame implements CookingMinigame {
   private targetTosses: number;
   private shrinkSpeed: number;
   private sweetTol: number;
+  private targetPhase = 0.78; // Shifts target ring radius on EVERY toss!
   private scores: number[] = [];
   private pulsePhase = 0;     // 0..1 ring shrinking onto center
   private tossAnim = 0;       // ingredients flying up in arc
-  private catQuote = 'Chờ vòng lửa co sát chảo rồi bấm HẤT CHẢO tung nguyên liệu lên!';
+  private catQuote = 'Vòng xanh đổi kích cỡ sau mỗi lần hất! Canh vòng lửa chạm vòng xanh rồi HẤT CHẢO!';
 
   private tossBtn: Rect = { x: 350, y: 368, width: 260, height: 54 };
 
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
     const d = clamp(ctx.difficulty, 0, 1);
-    this.targetTosses = d > 0.6 ? 4 : 3;
-    this.shrinkSpeed = lerp(0.62, 1.05, d);
-    this.sweetTol = lerp(0.18, 0.11, d);
+    this.targetTosses = d > 0.55 ? 4 : 3;
+    this.shrinkSpeed = lerp(0.68, 1.12, d);
+    this.sweetTol = lerp(0.16, 0.10, d);
+    this.targetPhase = randFloat(0.60, 0.86);
     this.title = `🍳 ${ctx.step.action} — ${ctx.recipe.name}`;
-    this.instruction = `Bấm HẤT CHẢO đúng lúc vòng lửa vàng sáng (${this.targetTosses} lần)!`;
+    this.instruction = `Vòng mục tiêu đổi cỡ liên tục — HẤT CHẢO đúng nhịp (${this.targetTosses} lần)!`;
   }
 
   onDown(pos: Vec2): void {
@@ -542,12 +544,13 @@ export class WokTossMinigame implements CookingMinigame {
 
   private doToss(): void {
     const cx = BOARD_RECT.x + BOARD_RECT.width / 2;
-    const dist = Math.abs(this.pulsePhase - 0.84);
+    const dist = Math.abs(this.pulsePhase - this.targetPhase);
     const s = dist <= this.sweetTol ? 100 : dist <= this.sweetTol + 0.14 ? 76 : 52;
     this.scores.push(s);
     this.tossCount++;
     this.tossAnim = 0.42;
     this.pulsePhase = 0;
+    this.targetPhase = randFloat(0.55, 0.88); // Fresh new ring size for next toss!
 
     this.ctx.particles.emitFireSparks(cx, 286, 18);
     this.ctx.particles.shake(4, 0.14);
@@ -603,16 +606,17 @@ export class WokTossMinigame implements CookingMinigame {
     const cx = b.x + b.width / 2;
     const cy = 262;
 
-    // Target golden ring + shrinking timing ring
+    // Dynamic target golden/green ring + shrinking timing ring
+    const targetR = 128 - this.targetPhase * 86;
     ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, 56, 0, Math.PI * 2);
-    ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
+    ctx.arc(cx, cy, targetR, 0, Math.PI * 2);
+    ctx.strokeStyle = 'rgba(76, 175, 80, 0.8)';
     ctx.lineWidth = 6;
     ctx.stroke();
 
     const shrinkR = 128 - this.pulsePhase * 86;
-    const inSweet = Math.abs(this.pulsePhase - 0.84) <= this.sweetTol;
+    const inSweet = Math.abs(this.pulsePhase - this.targetPhase) <= this.sweetTol;
     ctx.beginPath();
     ctx.arc(cx, cy, shrinkR, 0, Math.PI * 2);
     ctx.strokeStyle = inSweet ? '#ffd166' : 'rgba(244, 140, 6, 0.8)';
@@ -735,6 +739,13 @@ export class LayerPourMinigame implements CookingMinigame {
             { name: 'Sữa đặc Ông Thọ', color: '#f7ebd2', targetTop: 0.36 },
             { name: 'Cà phê phin đậm đà', color: '#4a2410', targetTop: 0.86 },
           ];
+    }
+
+    // Add subtle randomized shift to each layer's target line so every pour requires focus!
+    for (let i = 0; i < this.layers.length; i++) {
+      const prev = i > 0 ? this.layers[i - 1].targetTop + 0.16 : 0.22;
+      const next = i < this.layers.length - 1 ? this.layers[i + 1].targetTop - 0.16 : 0.92;
+      this.layers[i].targetTop = clamp(this.layers[i].targetTop + randFloat(-0.06, 0.06), prev, next);
     }
 
     this.catQuote = `Giữ nút RÓT để đổ lớp "${this.layers[0].name}" tới đúng vạch vàng rồi thả tay nha!`;

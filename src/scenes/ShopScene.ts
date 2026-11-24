@@ -24,6 +24,15 @@ export interface ShopItem {
 
 export const SHOP_ITEMS: ShopItem[] = [
   {
+    id: 'mo_rong_quan',
+    icon: '🏪',
+    name: 'Mở Rộng Quán (Xe Đẩy → 5 Sao)',
+    desc: 'Nâng cấp không gian quán, +2 phần nguyên liệu sơ chế & +15% giá bán!',
+    baseCost: 120,
+    maxLevel: 3,
+    color: '#38BDF8',
+  },
+  {
     id: 'thuong_meo_vang',
     icon: '🐾',
     name: 'Mèo Vàng Chiêu Tài',
@@ -54,7 +63,7 @@ export const SHOP_ITEMS: ShopItem[] = [
     id: 'dao_bep_truong',
     icon: '👑',
     name: 'Bí Kíp Vằn Bếp Trưởng',
-    desc: '+10% điểm chất lượng mỗi minigame',
+    desc: '+10% điểm chất lượng & +1 phần sơ chế mỗi cấp',
     baseCost: 160,
     maxLevel: 3,
     color: '#FCA311',
@@ -63,12 +72,69 @@ export const SHOP_ITEMS: ShopItem[] = [
     id: 'phu_bep_sieu_toc',
     icon: '⚡',
     name: 'Phụ Bếp Thần Tốc',
-    desc: 'Mèo Vàng tự làm giúp thêm bước phụ siêu nhanh!',
+    desc: 'Mèo Vàng tự tiếp tế nhanh & giảm số bước sơ chế!',
     baseCost: 190,
     maxLevel: 3,
     color: '#2A9D8F',
   },
 ];
+
+export interface StallTierInfo {
+  tier: 1 | 2 | 3 | 4;
+  name: string;
+  icon: string;
+  bgKey: string;
+  stockBonus: number;
+  priceBonus: number;
+}
+
+export const STALL_TIERS: StallTierInfo[] = [
+  {
+    tier: 1,
+    name: 'Xe Đẩy Vỉa Hè',
+    icon: '🛒',
+    bgKey: 'bg_stall_1',
+    stockBonus: 0,
+    priceBonus: 0,
+  },
+  {
+    tier: 2,
+    name: 'Quán Vỉa Hè Mái Hiên',
+    icon: '⛺',
+    bgKey: 'bg_stall_2',
+    stockBonus: 2,
+    priceBonus: 0.15,
+  },
+  {
+    tier: 3,
+    name: 'Quán Gia Truyền Phố Cổ',
+    icon: '🏮',
+    bgKey: 'bg_stall_3',
+    stockBonus: 4,
+    priceBonus: 0.3,
+  },
+  {
+    tier: 4,
+    name: 'Nhà Hàng Bếp Việt 5 Sao',
+    icon: '👑',
+    bgKey: 'bg_stall_4',
+    stockBonus: 6,
+    priceBonus: 0.5,
+  },
+];
+
+/**
+ * Determine the player's current Stall Tier (1 = Humble Pushcart → 4 = 5-Star Restaurant).
+ * Players can expand early by buying `mo_rong_quan` in Shop, OR naturally expand as they
+ * reach new chapters!
+ */
+export function getStallTier(save: Readonly<SaveData>, levelId?: number): StallTierInfo {
+  const shopLv = save.upgrades['mo_rong_quan'] ?? 0;
+  const lv = levelId ?? save.currentLevel;
+  const progressTier = lv >= 31 ? 3 : lv >= 21 ? 2 : lv >= 11 ? 1 : 0;
+  const idx = Math.min(3, Math.max(shopLv, progressTier));
+  return STALL_TIERS[idx];
+}
 
 export interface ActiveUpgradeBonuses {
   priceMultiplier: number;
@@ -76,22 +142,25 @@ export interface ActiveUpgradeBonuses {
   patienceMultiplier: number;
   minigameQualityBonus: number;
   autoSkipStepBonus: number;
+  prepStockBonus: number;
 }
 
 /** Calculate active gameplay bonuses from purchased Shop upgrades */
-export function getUpgradeBonuses(save: Readonly<SaveData>): ActiveUpgradeBonuses {
+export function getUpgradeBonuses(save: Readonly<SaveData>, levelId?: number): ActiveUpgradeBonuses {
   const tipLv = save.upgrades['thuong_meo_vang'] ?? 0;
   const patLv = save.upgrades['quay_am_cung'] ?? 0;
   const priceLv = save.upgrades['gia_vi_hoang_gia'] ?? 0;
   const qualLv = save.upgrades['dao_bep_truong'] ?? 0;
   const speedLv = save.upgrades['phu_bep_sieu_toc'] ?? 0;
+  const stall = getStallTier(save, levelId);
 
   return {
-    priceMultiplier: 1 + priceLv * 0.2,
+    priceMultiplier: 1 + priceLv * 0.2 + stall.priceBonus,
     tipMultiplier: 1 + tipLv * 0.2,
     patienceMultiplier: 1 + patLv * 0.25,
     minigameQualityBonus: qualLv * 10,
     autoSkipStepBonus: speedLv,
+    prepStockBonus: stall.stockBonus + qualLv,
   };
 }
 
@@ -120,19 +189,19 @@ export class ShopScene implements Scene {
     this.elapsed = 0;
     this.particles.clear();
 
-    // Build 5 item cards cleanly in a 2-column or vertical layout on the right
+    // Build 6 item cards cleanly on the right
     this.buyBtns = [];
     const listX = 290;
     const listW = 640;
-    const rowH = 78;
-    const gap = 10;
-    const startY = 82;
+    const rowH = 66;
+    const gap = 8;
+    const startY = 76;
 
     SHOP_ITEMS.forEach((item, idx) => {
       const y = startY + idx * (rowH + gap);
       this.buyBtns.push({
         item,
-        rect: { x: listX + listW - 148, y: y + 17, width: 132, height: 44 },
+        rect: { x: listX + listW - 144, y: y + 12, width: 130, height: 42 },
       });
     });
 
@@ -228,8 +297,9 @@ export class ShopScene implements Scene {
     ctx.font = 'bold 18px monospace';
     drawTextShadow(ctx, `💰 ${formatMoney(save.money)}`, W - 104, 35, '#80ed99');
 
-    // Left Shopkeeper Card (Mèo Vàng Phụ Bếp + Vằn Bếp Trưởng!)
-    const leftRect: Rect = { x: 24, y: 82, width: 244, height: 432 };
+    // Left Shopkeeper Card (Mèo Vàng Phụ Bếp + Current Stall Tier preview!)
+    const stall = getStallTier(save);
+    const leftRect: Rect = { x: 24, y: 76, width: 244, height: 438 };
     roundRect(ctx, leftRect.x, leftRect.y, leftRect.width, leftRect.height, 16);
     ctx.fillStyle = 'rgba(15, 16, 30, 0.72)';
     ctx.fill();
@@ -237,22 +307,34 @@ export class ShopScene implements Scene {
     ctx.lineWidth = 2;
     ctx.stroke();
 
+    // Current Stall Tier Pill on top of left card
+    roundRect(ctx, leftRect.x + 12, leftRect.y + 12, leftRect.width - 24, 34, 10);
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.16)';
+    ctx.fill();
+    ctx.strokeStyle = '#38BDF8';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = 'bold 12.5px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, `${stall.icon} Cấp ${stall.tier}: ${stall.name}`, leftRect.x + leftRect.width / 2, leftRect.y + 29, '#7dd3fc');
+
     const bob = Math.sin(this.elapsed * 3) * 4;
     ctx.imageSmoothingEnabled = true;
     if (this.engine.assets.hasImage('npc_cat_golden')) {
       const img = this.engine.assets.getImage('npc_cat_golden');
-      const dh = 165;
+      const dh = 148;
       const dw = (img.width / img.height) * dh;
-      ctx.drawImage(img, leftRect.x + (leftRect.width - dw) / 2, leftRect.y + 24 + bob, dw, dh);
+      ctx.drawImage(img, leftRect.x + (leftRect.width - dw) / 2, leftRect.y + 52 + bob, dw, dh);
     }
 
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = 'bold 16px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, '🐾 Tiệm Mèo Vàng', leftRect.x + leftRect.width / 2, leftRect.y + 210, '#F4A261');
+    drawTextShadow(ctx, '🐾 Tiệm Mèo Vàng', leftRect.x + leftRect.width / 2, leftRect.y + 216, '#F4A261');
 
     // Shopkeeper speech bubble
-    roundRect(ctx, leftRect.x + 14, leftRect.y + 234, leftRect.width - 28, 178, 12);
+    roundRect(ctx, leftRect.x + 14, leftRect.y + 238, leftRect.width - 28, 186, 12);
     ctx.fillStyle = 'rgba(255, 252, 245, 0.08)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(244, 162, 97, 0.4)';
@@ -263,14 +345,14 @@ export class ShopScene implements Scene {
     ctx.textBaseline = 'top';
     ctx.font = '14px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#fffcf5';
-    this.wrapText(ctx, this.catQuote, leftRect.x + 26, leftRect.y + 250, leftRect.width - 52, 22);
+    this.wrapText(ctx, this.catQuote, leftRect.x + 26, leftRect.y + 252, leftRect.width - 52, 21);
 
-    // Right: 5 Upgrade Cards
+    // Right: 6 Upgrade Cards
     const listX = 290;
     const listW = 640;
-    const rowH = 78;
-    const gap = 10;
-    const startY = 82;
+    const rowH = 66;
+    const gap = 8;
+    const startY = 76;
 
     SHOP_ITEMS.forEach((item, idx) => {
       const y = startY + idx * (rowH + gap);
@@ -279,7 +361,7 @@ export class ShopScene implements Scene {
       const cost = getShopItemCost(item, lv);
       const canAfford = !isMax && save.money >= cost;
 
-      roundRect(ctx, listX, y, listW, rowH, 14);
+      roundRect(ctx, listX, y, listW, rowH, 12);
       ctx.fillStyle = 'rgba(255, 255, 255, 0.06)';
       ctx.fill();
       ctx.strokeStyle = canAfford ? item.color : 'rgba(255, 255, 255, 0.12)';
@@ -287,27 +369,27 @@ export class ShopScene implements Scene {
       ctx.stroke();
 
       // Icon badge
-      roundRect(ctx, listX + 12, y + 12, 54, 54, 12);
+      roundRect(ctx, listX + 10, y + 9, 48, 48, 10);
       ctx.fillStyle = `${item.color}33`;
       ctx.fill();
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = '28px "Segoe UI"';
-      ctx.fillText(item.icon, listX + 39, y + 39);
+      ctx.font = '25px "Segoe UI"';
+      ctx.fillText(item.icon, listX + 34, y + 33);
 
-      // Name & level pips
+      // Name & desc
       ctx.textAlign = 'left';
-      ctx.font = 'bold 17px "Segoe UI", system-ui, sans-serif';
-      drawTextShadow(ctx, item.name, listX + 78, y + 25, '#fff');
+      ctx.font = 'bold 15.5px "Segoe UI", system-ui, sans-serif';
+      drawTextShadow(ctx, item.name, listX + 68, y + 20, '#fff');
 
-      ctx.font = '13px "Segoe UI", system-ui, sans-serif';
+      ctx.font = '12px "Segoe UI", system-ui, sans-serif';
       ctx.fillStyle = 'rgba(255, 255, 255, 0.72)';
-      ctx.fillText(item.desc, listX + 78, y + 48);
+      ctx.fillText(item.desc, listX + 68, y + 39);
 
       // Level dots
       for (let p = 0; p < item.maxLevel; p++) {
         ctx.beginPath();
-        ctx.arc(listX + 84 + p * 16, y + 66, 4.5, 0, Math.PI * 2);
+        ctx.arc(listX + 74 + p * 15, y + 55, 4, 0, Math.PI * 2);
         ctx.fillStyle = p < lv ? '#FCA311' : 'rgba(255, 255, 255, 0.18)';
         ctx.fill();
       }

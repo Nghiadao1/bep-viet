@@ -11,7 +11,7 @@
 import type { Rect, Vec2 } from '../types';
 import { InputManager } from '../core/InputManager';
 import { roundRect, drawTextShadow, drawProgressBar } from '../utils/draw';
-import { clamp, lerp } from '../utils/math';
+import { clamp, lerp, randFloat } from '../utils/math';
 import {
   BOARD_RECT,
   gradeFromScore,
@@ -440,10 +440,11 @@ export class BlanchDipMinigame implements CookingMinigame {
   constructor(ctx: MinigameContext) {
     this.ctx = ctx;
     this.title = `💧 Trụng Giỏ Tre — ${ctx.recipe.name}`;
-    this.speed = lerp(0.46, 0.74, ctx.difficulty);
-    const halfSpan = lerp(0.14, 0.085, ctx.difficulty);
-    this.sweetMin = 0.72 - halfSpan;
-    this.sweetMax = 0.72 + halfSpan;
+    this.speed = lerp(0.50, 0.80, ctx.difficulty);
+    const halfSpan = lerp(0.13, 0.075, ctx.difficulty);
+    const center = randFloat(0.52, 0.80); // Randomized blanch sweet-spot every time!
+    this.sweetMin = clamp(center - halfSpan, 0.34, 0.78);
+    this.sweetMax = clamp(center + halfSpan, 0.50, 0.92);
   }
 
   onDown(pos: Vec2): void {

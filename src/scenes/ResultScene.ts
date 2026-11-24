@@ -15,6 +15,8 @@ import { GameScene } from './GameScene';
 import { MapScene } from './MapScene';
 import { ShopScene, SHOP_ITEMS, getShopItemCost } from './ShopScene';
 import { StoryScene } from './StoryScene';
+import { MarketRunnerScene } from './MarketRunnerScene';
+import { GangsterBattleScene } from './GangsterBattleScene';
 
 export interface ResultData {
   levelId: number;
@@ -175,18 +177,34 @@ export class ResultScene implements Scene {
           return;
         }
         const nextId = Math.min(50, this.data.levelId + 1);
-        const nextLevel = getLevel(nextId);
-        const seen = this.engine.save.current.seenChapters ?? [];
-        // Auto-play Chapter Opening Cutscene when entering a brand-new Vietnamese region!
-        if (nextLevel && !seen.includes(nextLevel.chapter)) {
-          this.engine.save.update({ seenChapters: [...seen, nextLevel.chapter] });
+        const startLevel = (bonusStock = 0): void => {
+          const nextLevel = getLevel(nextId);
+          const seen = this.engine.save.current.seenChapters ?? [];
+          if (nextLevel && !seen.includes(nextLevel.chapter)) {
+            this.engine.save.update({ seenChapters: [...seen, nextLevel.chapter] });
+            this.engine.scenes.replace(
+              new StoryScene(this.engine, nextLevel.chapter, () => {
+                this.engine.scenes.replace(new GameScene(this.engine, nextId, false, bonusStock));
+              }),
+            );
+          } else {
+            this.engine.scenes.replace(new GameScene(this.engine, nextId, false, bonusStock));
+          }
+        };
+
+        // Exciting between-level random events!
+        // Guaranteed early preview: Lv 1→2 runs Market Runner, Lv 2→3 runs Gangster Cat Raid!
+        const roll = Math.random();
+        if (this.data.levelId === 1 || (this.data.levelId >= 3 && roll < 0.35)) {
           this.engine.scenes.replace(
-            new StoryScene(this.engine, nextLevel.chapter, () => {
-              this.engine.scenes.replace(new GameScene(this.engine, nextId));
-            }),
+            new MarketRunnerScene(this.engine, (bonusStock) => startLevel(bonusStock)),
+          );
+        } else if (this.data.levelId === 2 || (this.data.levelId >= 3 && roll < 0.65)) {
+          this.engine.scenes.replace(
+            new GangsterBattleScene(this.engine, () => startLevel(0)),
           );
         } else {
-          this.engine.scenes.replace(new GameScene(this.engine, nextId));
+          startLevel(0);
         }
         break;
       }

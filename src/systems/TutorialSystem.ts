@@ -12,9 +12,9 @@ export type TutorialStage =
   | 'none'
   | 'intro_boss'
   | 'intro_golden'
-  | 'pick_recipe'
-  | 'tap_first_station'
-  | 'finish_steps'
+  | 'prep_phase'
+  | 'service_mix'
+  | 'service_serve'
   | 'celebrate';
 
 export interface TutorialTarget {
@@ -36,7 +36,7 @@ const DIALOGUES: Record<Exclude<TutorialStage, 'none'>, DialogueMeta> = {
     speaker: 'boss',
     name: '👑 Vằn Bếp Trưởng',
     badgeColor: '#FCA311',
-    text: 'Meow~! Ta là Vằn Bếp Trưởng! Chào mừng bạn gia nhập xe phở Sài Gòn cùng tụi ta trên hành trình phục dựng Cuốn Sổ Vị Giác Việt Nam!',
+    text: 'Meow~! Ta là Vằn Bếp Trưởng! Khởi nghiệp từ chiếc Xe Đẩy Vỉa Hè nhỏ này, tụi mình sẽ chia mỗi ngày làm 2 Pha: Pha 1 Sơ Chế nguyên liệu trước, Pha 2 Mở Xe Đẩy bày bán Pick & Mix!',
     cta: 'Tiếp tục ▶',
     modal: true,
   },
@@ -44,37 +44,37 @@ const DIALOGUES: Record<Exclude<TutorialStage, 'none'>, DialogueMeta> = {
     speaker: 'golden',
     name: '🐾 Mèo Vàng Phụ Bếp',
     badgeColor: '#F4A261',
-    text: 'Còn em là Mèo Vàng Phụ Bếp nè! Để em chỉ nhanh cách bán hàng: mỗi khi khách tới sẽ hiện món họ gọi trong bong bóng trên đầu nha!',
-    cta: 'Vào bếp thôi! 🍜',
+    text: 'Em là Mèo Vàng Phụ Bếp nè! Trong Pha 1 Sơ Chế, mục tiêu sẽ dịch chuyển liên tục — làm càng chuẩn càng nhiều phần dự trữ! Xong hết là mình bày ra khay để ghép món bán siêu tốc!',
+    cta: 'Vào Pha 1 Sơ Chế! 🔥',
     modal: true,
   },
-  pick_recipe: {
-    speaker: 'golden',
-    name: '🐾 Mèo Vàng Phụ Bếp',
-    badgeColor: '#F4A261',
-    text: 'Khách đầu tiên gọi Phở Bò rồi kìa! Chạm vào thẻ Phở Bò phát sáng bên dưới để bắt đầu nấu nhé!',
-    modal: false,
-  },
-  tap_first_station: {
+  prep_phase: {
     speaker: 'boss',
     name: '👑 Vằn Bếp Trưởng',
     badgeColor: '#FCA311',
-    text: 'Khá lắm! Giờ chạm vào trạm viền vàng sáng (Nồi nước dùng) cho Bước 1. Nước dùng mà đục là mất hết linh hồn đó, làm đúng thứ tự nhé!',
+    text: 'PHA 1 — SƠ CHẾ: Chạm vào các khay nguyên liệu phát sáng trên quầy để nấu nước dùng, thái thịt, bắt sâu rau & chém hành tỏi trước khi mở quán nhé!',
     modal: false,
   },
-  finish_steps: {
+  service_mix: {
     speaker: 'golden',
     name: '🐾 Mèo Vàng Phụ Bếp',
     badgeColor: '#F4A261',
-    text: 'Thơm xỉu luôn anh Vằn ơi! Cứ chạm lần lượt từng trạm viền vàng cho tới bước cuối — xong món sẽ tự bưng ra cho khách nha!',
+    text: 'PHA 2 — BÀY BÁN PICK & MIX: Chạm vào các khay nguyên liệu đã sơ chế (viền vàng sáng) + chọn đúng gia vị bên dưới theo phiếu khách gọi để ghép thành món!',
+    modal: false,
+  },
+  service_serve: {
+    speaker: 'golden',
+    name: '🐾 Mèo Vàng Phụ Bếp',
+    badgeColor: '#4CAF50',
+    text: 'Ghép đủ nguyên liệu rồi!! Thêm gia vị khách muốn (tránh món bị cấm 🚫) rồi bấm nút xanh "🍽️ GIAO MÓN!" hoặc chạm thẳng vào khách nhé!',
     modal: false,
   },
   celebrate: {
     speaker: 'both',
     name: '👑 Vằn Bếp Trưởng & Mèo Vàng Phụ Bếp',
     badgeColor: '#4CAF50',
-    text: 'Xuất sắc!! Tô phở đầu tiên chuẩn vị Sài Gòn! Cùng Vằn Bếp Trưởng và Mèo Vàng kiếm thật nhiều sao để đi từ Nam ra Bắc chinh phục ẩm thực Việt nhé! Meow~ ⭐',
-    cta: 'Bắt đầu bán hàng! 🔥',
+    text: 'Xuất sắc!! Đã hiểu trọn quy trình Sơ Chế → Pick & Mix rồi! Kiếm thật nhiều tiền nâng cấp từ Xe Đẩy lên Nhà Hàng 5 Sao và cẩn thận Mèo Giang Hồ đó nha! Meow~ ⭐',
+    cta: 'Chiến tiếp thôi! 🔥',
     modal: true,
   },
 };
@@ -127,26 +127,23 @@ export class TutorialSystem {
     return (
       this.stage === 'intro_boss' ||
       this.stage === 'intro_golden' ||
-      this.stage === 'pick_recipe' ||
-      this.stage === 'tap_first_station' ||
+      this.stage === 'prep_phase' ||
+      this.stage === 'service_mix' ||
       this.stage === 'celebrate'
     );
   }
 
-  /** Notify tutorial when player selects a recipe card */
-  onDishStarted(): void {
-    if (this.stage === 'pick_recipe') {
-      this.setStage('tap_first_station');
+  /** Notify tutorial when Prep Phase finishes and Service Phase opens */
+  onServicePhaseStarted(): void {
+    if (this.stage === 'prep_phase') {
+      this.setStage('service_mix');
     }
   }
 
-  /** Notify tutorial when player clicks the right station */
-  onStationCookStarted(nextStepLabel?: string): void {
-    if (this.stage === 'tap_first_station') {
-      this.setStage('finish_steps');
-    }
-    if (nextStepLabel) {
-      this.dynamicHint = nextStepLabel;
+  /** Notify tutorial when the player has mixed all required base ingredients */
+  onDishReadyToServe(): void {
+    if (this.stage === 'service_mix') {
+      this.setStage('service_serve');
     }
   }
 
@@ -205,7 +202,7 @@ export class TutorialSystem {
         if (this.stage === 'intro_boss') {
           this.setStage('intro_golden');
         } else if (this.stage === 'intro_golden') {
-          this.setStage('pick_recipe');
+          this.setStage('prep_phase');
         } else if (this.stage === 'celebrate') {
           this.finish();
         }
@@ -462,10 +459,10 @@ export class TutorialSystem {
     ctx.fillStyle = meta.badgeColor;
     ctx.fillText(meta.name, cardX + 94, cardY + 10);
 
-    // Body text (with dynamic next-station hint during finish_steps)
+    // Body text (with optional dynamic hint)
     const bodyText =
-      this.stage === 'finish_steps' && this.dynamicHint
-        ? `Tiếp theo: chạm trạm ${this.dynamicHint}! Xong bước cuối món sẽ tự phục vụ khách nhé!`
+      this.dynamicHint && (this.stage === 'prep_phase' || this.stage === 'service_mix')
+        ? this.dynamicHint
         : meta.text;
 
     ctx.font = '14px "Segoe UI", system-ui, sans-serif';

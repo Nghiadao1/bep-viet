@@ -36,8 +36,30 @@ export class Game {
     const assets = this.engine.assets;
     const images: Record<string, string> = {
       bg_saigon: './sprites/backgrounds/saigon_night.png',
+      bg_stall_1: './sprites/backgrounds/stall_1_cart.jpg',
+      bg_stall_2: './sprites/backgrounds/stall_2_sidewalk.jpg',
+      bg_stall_3: './sprites/backgrounds/stall_3_heritage.jpg',
+      bg_stall_4: './sprites/backgrounds/stall_4_luxury.jpg',
+      bg_market_runner: './sprites/backgrounds/market_runner.jpg',
+      bg_alley_arena: './sprites/backgrounds/alley_arena.jpg',
       npc_cat_boss: './sprites/npc/cat_boss.png',
       npc_cat_golden: './sprites/npc/cat_golden.png',
+      npc_cat_gangster: './sprites/npc/cat_gangster.png',
+      prop_worm: './sprites/props/worm.png',
+      prop_onion: './sprites/props/prop_onion.png',
+      prop_garlic: './sprites/props/prop_garlic.png',
+      prop_chili: './sprites/props/prop_chili.png',
+      prop_lime: './sprites/props/prop_lime.png',
+      prop_carrot: './sprites/props/prop_carrot.png',
+      prop_mango: './sprites/props/prop_mango.png',
+      prop_bomb_coal: './sprites/props/prop_bomb_coal.png',
+      prop_scooter: './sprites/props/prop_scooter.png',
+      prop_barrier: './sprites/props/prop_barrier.png',
+      prop_basket: './sprites/props/prop_basket.png',
+      rps_rock: './sprites/props/rps_rock.png',
+      rps_scissors: './sprites/props/rps_scissors.png',
+      rps_paper: './sprites/props/rps_paper.png',
+      brawl_cloud: './sprites/props/brawl_cloud.png',
     };
 
     // All 10 kitchen stations

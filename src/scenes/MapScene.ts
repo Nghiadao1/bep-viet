@@ -13,6 +13,8 @@ import { MenuScene } from './MenuScene';
 import { GameScene } from './GameScene';
 import { StoryScene } from './StoryScene';
 import { ShopScene } from './ShopScene';
+import { MarketRunnerScene } from './MarketRunnerScene';
+import { GangsterBattleScene } from './GangsterBattleScene';
 import { formatMoney } from '../utils/math';
 
 // Accurate geographic coastline waypoints [lon, lat] of Mainland Vietnam (clockwise from Hà Giang)
@@ -154,10 +156,12 @@ export class MapScene implements Scene {
   // Click hit regions
   private pinHitRects: { chapterIdx: number; rect: Rect; pos: Vec2 }[] = [];
   private levelRects: Rect[] = [];
-  private backBtn: Rect = { x: 20, y: 12, width: 120, height: 42 };
+  private backBtn: Rect = { x: 18, y: 12, width: 108, height: 42 };
+  private marketBtn: Rect = { x: 356, y: 12, width: 130, height: 42 };
+  private gangsterBtn: Rect = { x: 494, y: 12, width: 142, height: 42 };
   private storyBtn: Rect = { x: 760, y: 98, width: 164, height: 34 };
   private shopBtn: Rect = { x: 644, y: 12, width: 158, height: 42 };
-  private tutorialBtn: Rect = { x: 812, y: 12, width: 128, height: 42 };
+  private tutorialBtn: Rect = { x: 810, y: 12, width: 132, height: 42 };
 
   // Cached projected polygons
   private mainlandPts: Vec2[] = [];
@@ -195,6 +199,27 @@ export class MapScene implements Scene {
       // Back to Menu
       if (InputManager.hitTest(pos, this.backBtn, 6)) {
         this.engine.scenes.replace(new MenuScene(this.engine));
+        return;
+      }
+
+      // Quick-play Emergency Market Runner (Subway Surfers dash)!
+      if (InputManager.hitTest(pos, this.marketBtn, 6)) {
+        this.engine.scenes.replace(
+          new MarketRunnerScene(this.engine, (bonusStock) => {
+            const cur = this.engine.save.current.currentLevel;
+            this.engine.scenes.replace(new GameScene(this.engine, cur, false, bonusStock));
+          }),
+        );
+        return;
+      }
+
+      // Quick-play Gangster Cat Defense (Rock-Paper-Scissors brawl)!
+      if (InputManager.hitTest(pos, this.gangsterBtn, 6)) {
+        this.engine.scenes.replace(
+          new GangsterBattleScene(this.engine, () => {
+            this.engine.scenes.replace(new MapScene(this.engine));
+          }),
+        );
         return;
       }
 
@@ -307,8 +332,30 @@ export class MapScene implements Scene {
     );
 
     // Title
-    ctx.font = 'bold 23px "Segoe UI", system-ui, sans-serif';
-    drawTextShadow(ctx, '🗺 Hành Trình Bếp Việt', 392, 33, '#FCA311');
+    ctx.font = 'bold 21px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🗺 Bản Đồ Bếp Việt', 240, 33, '#FCA311');
+
+    // Quick-play Event 1: Emergency Market Runner
+    const mktHover = InputManager.hitTest(this.engine.input.pointer, this.marketBtn);
+    roundRect(ctx, this.marketBtn.x, this.marketBtn.y, this.marketBtn.width, this.marketBtn.height, 10);
+    ctx.fillStyle = mktHover ? 'rgba(56, 189, 248, 0.35)' : 'rgba(56, 189, 248, 0.18)';
+    ctx.fill();
+    ctx.strokeStyle = '#38BDF8';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🏃 Chạy Chợ', this.marketBtn.x + this.marketBtn.width / 2, this.marketBtn.y + this.marketBtn.height / 2, '#7dd3fc');
+
+    // Quick-play Event 2: Defend Stall vs Gangster Cat!
+    const gngHover = InputManager.hitTest(this.engine.input.pointer, this.gangsterBtn);
+    roundRect(ctx, this.gangsterBtn.x, this.gangsterBtn.y, this.gangsterBtn.width, this.gangsterBtn.height, 10);
+    ctx.fillStyle = gngHover ? 'rgba(230, 57, 70, 0.42)' : 'rgba(230, 57, 70, 0.22)';
+    ctx.fill();
+    ctx.strokeStyle = '#E63946';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.font = 'bold 13px "Segoe UI", system-ui, sans-serif';
+    drawTextShadow(ctx, '🥊 Đuổi Giang Hồ', this.gangsterBtn.x + this.gangsterBtn.width / 2, this.gangsterBtn.y + this.gangsterBtn.height / 2, '#fca5a5');
 
     // Upgrade Shop button with current money!
     const shopHover = InputManager.hitTest(this.engine.input.pointer, this.shopBtn);
