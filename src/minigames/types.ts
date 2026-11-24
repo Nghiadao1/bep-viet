@@ -109,17 +109,15 @@ export function renderMinigameFrame(
   ctx.lineTo(b.x + b.width - 12, b.y + 54);
   ctx.stroke();
 
-  // Title
+  // Title (line 1) & Instruction (line 2) — stacked cleanly so long Vietnamese text NEVER overlaps!
   ctx.textAlign = 'left';
   ctx.textBaseline = 'middle';
-  ctx.font = 'bold 21px "Segoe UI", system-ui, sans-serif';
-  drawTextShadow(ctx, opts.title, b.x + 20, b.y + 28, '#FCA311');
+  ctx.font = 'bold 18.5px "Segoe UI", system-ui, sans-serif';
+  drawTextShadow(ctx, opts.title, b.x + 20, b.y + 19, '#FCA311');
 
-  // Instruction sub-pill on right of header
-  ctx.textAlign = 'right';
-  ctx.font = '13.5px "Segoe UI", system-ui, sans-serif';
+  ctx.font = '12.5px "Segoe UI", system-ui, sans-serif';
   ctx.fillStyle = '#fde68a';
-  ctx.fillText(opts.instruction, b.x + b.width - 20, b.y + 28);
+  ctx.fillText(opts.instruction, b.x + 20, b.y + 40);
 
   // Live Cat Mentor popping up on bottom-left of screen beside the board!
   const catKey = opts.catSpeaker === 'boss' ? 'npc_cat_boss' : 'npc_cat_golden';

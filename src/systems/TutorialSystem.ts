@@ -364,9 +364,9 @@ export class TutorialSystem {
     ctx.fillStyle = 'rgba(255,255,255,0.45)';
     ctx.fillText('Chạm khung thoại để tiếp tục...', box.x + 28, btn.y + btn.height / 2);
 
-    // Skip button top-right (except celebration)
+    // Skip button top-right of dialogue box (never collides with Pause button!)
     if (this.stage !== 'celebrate') {
-      this.skipBtn = { x: W - 114, y: 18, width: 96, height: 36 };
+      this.skipBtn = { x: box.x + box.width - 108, y: box.y + 12, width: 94, height: 30 };
       this.renderSkipButton(ctx);
     }
 

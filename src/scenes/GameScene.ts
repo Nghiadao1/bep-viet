@@ -474,6 +474,11 @@ export class GameScene implements Scene {
   private handleClick(pos: { x: number; y: number }): void {
     if (this.gameOver) return;
 
+    // Tutorial modal has top priority so Skip/Next never clicks through to Pause!
+    if (this.tutorial.isModalBlocking && !this.activeMinigame && this.tutorial.handleClick(pos)) {
+      return;
+    }
+
     // Top-right Fullscreen & Pause
     if (supportsFullscreen() && InputManager.hitTest(pos, this.fullscreenBtn, 6)) {
       void toggleFullscreen();
@@ -1366,9 +1371,9 @@ export class GameScene implements Scene {
     const preppedCount = this.trays.filter((t) => t.prepped).length;
     const totalCount = this.trays.length;
 
-    // Cozy floating Prep Progress Sign on the upper-left counter area (leaves right Cat Booth clear!)
-    roundRect(ctx, 22, 66, 718, 108, 16);
-    ctx.fillStyle = 'rgba(15, 16, 32, 0.82)';
+    // Compact Prep Progress Sign on left half (leaves right half clear for Cat Booth + speech bubble!)
+    roundRect(ctx, 20, 62, 476, 112, 14);
+    ctx.fillStyle = 'rgba(15, 16, 32, 0.84)';
     ctx.fill();
     ctx.strokeStyle = '#FCA311';
     ctx.lineWidth = 2;
@@ -1376,38 +1381,36 @@ export class GameScene implements Scene {
 
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
-    ctx.font = 'bold 21px "Segoe UI", system-ui, sans-serif';
+    ctx.font = 'bold 17.5px "Segoe UI", system-ui, sans-serif';
     drawTextShadow(
       ctx,
-      `🌅 PHA 1: CHUẨN BỊ NGUYÊN LIỆU (${preppedCount}/${totalCount} khay sẵn sàng)`,
-      42,
-      94,
+      `🌅 PHA 1: SƠ CHẾ NGUYÊN LIỆU (${preppedCount}/${totalCount})`,
+      34,
+      84,
       '#ffd166',
     );
 
-    ctx.font = '14px "Segoe UI", system-ui, sans-serif';
+    ctx.font = '12.5px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#e2e8f0';
-    ctx.fillText(
-      'Chạm vào từng khay nguyên liệu phát sáng bên dưới để sơ chế trước khi mở quán! Điểm càng cao → càng nhiều phần dự trữ ⭐',
-      42,
-      124,
-    );
+    ctx.fillText('Chạm từng khay phát sáng bên dưới để sơ chế trước khi mở quán!', 34, 108);
+    ctx.fillStyle = '#94a3b8';
+    ctx.fillText('Điểm càng cao → càng nhiều phần dự trữ & chất lượng ⭐', 34, 126);
 
     // Today's Menu icons preview strip
-    ctx.font = 'bold 12.5px "Segoe UI", system-ui, sans-serif';
+    ctx.font = 'bold 12px "Segoe UI", system-ui, sans-serif';
     ctx.fillStyle = '#80ed99';
-    ctx.fillText('Thực đơn hôm nay:', 42, 152);
-    let rx = 166;
-    for (const r of this.recipes) {
+    ctx.fillText('Món hôm nay:', 34, 152);
+    let rx = 122;
+    for (const r of this.recipes.slice(0, 3)) {
       const fKey = `food_${r.id}`;
       if (this.engine.assets.hasImage(fKey)) {
         ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(this.engine.assets.getImage(fKey), rx, 136, 30, 30);
+        ctx.drawImage(this.engine.assets.getImage(fKey), rx, 138, 26, 26);
       }
-      ctx.font = 'bold 12px "Segoe UI", sans-serif';
+      ctx.font = 'bold 11.5px "Segoe UI", sans-serif';
       ctx.fillStyle = '#fff';
-      ctx.fillText(r.name, rx + 34, 152);
-      rx += ctx.measureText(r.name).width + 52;
+      ctx.fillText(r.name, rx + 30, 152);
+      rx += ctx.measureText(r.name).width + 44;
     }
   }
 
